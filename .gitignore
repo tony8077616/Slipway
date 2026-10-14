@@ -1,0 +1,14 @@
+# 本機產物與敏感資料
+logs/
+*.iso
+*.wim
+*.esd
+*.log
+.claude/
+.vs/
+*.user
+
+# 工具目錄內的非發布檔（僅保留 zip 與 SHA256SUMS）
+tools/wimlib/*
+!tools/wimlib/*.zip
+!tools/wimlib/SHA256SUMS.txt
