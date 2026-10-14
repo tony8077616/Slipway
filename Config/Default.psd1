@@ -10,9 +10,9 @@
     ResetBase            = $false
     ResetBaseOS          = $false
     OutputFormat         = 'WIM'                 # 'WIM' 或 'ESD'
-    Wimlib               = @{ Path = '' }
+    Wimlib               = @{ Path = '' }        # 非空 = 手動指定 wimlib-imagex.exe，ESD 轉換改用 wimlib；檔案不存在時自動下載 1.14.5（SHA-256 校驗）；空白 = ESD→WIM 用 DISM，WIM→ESD 自動下載至 %LOCALAPPDATA%
     DismProvider         = 'Inbox'               # 'Inbox' 或 'ADK'，見 §3.4
-    AdkRoot              = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'  # oscdimg 與 ADK DISM 位置
+    AdkRoot              = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'  # oscdimg 與 ADK DISM 位置；缺少時自動安裝 Deployment Tools（需系統管理員權限）
     VirtualEditions      = @()                   # 例：@('IoTEnterpriseS')，見 §2.7
     DeleteSourceEdition  = $false                # 建立虛擬版本後是否刪除 EnterpriseS，見 §2.7.6
     LogLevel             = 'Info'

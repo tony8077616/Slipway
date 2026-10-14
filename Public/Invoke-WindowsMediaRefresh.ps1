@@ -91,11 +91,7 @@
     $oscdimg = $null
     switch ($Config.OutputFormat) {
         'WIM' { $oscdimg = Resolve-WinMediaOscdimg -Config $Config }
-        'ESD' {
-            if ([string]::IsNullOrEmpty($Config.Wimlib.Path) -or -not (Test-Path -LiteralPath $Config.Wimlib.Path)) {
-                throw 'OutputFormat 為 ESD，但 Wimlib.Path 未設定或找不到（§2.4）。'
-            }
-        }
+        'ESD' { $null = Resolve-WinMediaWimlib -Config $Config }
         default { throw "不支援的 OutputFormat：$($Config.OutputFormat)" }
     }
     if ($Config.DismProvider -eq 'ADK') { $null = Resolve-WinMediaAdk -Config $Config }

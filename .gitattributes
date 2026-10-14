@@ -1,0 +1,10 @@
+# PowerShell 原始碼：儲存為 LF，檢出時為 CRLF（工作目錄與 .ps1／.psm1／.psd1 規範一致）
+*.ps1  text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+
+# 校驗碼檔需為 LF，供 sha256sum -c 使用
+tools/wimlib/SHA256SUMS.txt text eol=lf
+
+# 第三方壓縮檔不做任何行尾轉換
+*.zip binary

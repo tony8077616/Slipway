@@ -29,7 +29,7 @@ Invoke-WindowsMediaRefresh (主流程，Public)
         ├─ 掛載母檔 ─ Mount-WinMediaImage
         ├─ 更新包分類 ─ Get-WinMediaPackageCategory
         ├─ DISM 操作 ─ Invoke-WinMediaDism（僅 Cmdlet）
-        ├─ 外部程式 ─ Invoke-WinMediaExternal（oscdimg、wimlib）
+        ├─ 外部程式 ─ Invoke-WinMediaExternal（oscdimg）、Invoke-WinMediaWimlib（wimlib）
         ├─ ESD 轉換 ─ Convert-WinMediaEsdToWim / Export-WinMediaEsd
         ├─ 虛擬版本 ─ Add-WinMediaVirtualEdition / Test-WinMediaVirtualEdition
         └─ 日誌 ─ Write-WinMediaLog、Invoke-WinMediaOperation、Protect-WinMediaLogValue
@@ -42,7 +42,10 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 - **Resolve-WinMediaAdk**：依序探測 ADK 的 DISM 目錄，取第一個含 `Dism.psd1` 或 `dism.exe` 者。`dism.exe` 只用於讀取版本號，不執行。
 - **Invoke-WinMediaDism**：包裝 DISM Cmdlet，檢查回傳碼，非零即中止。
 - **Mount-WinMediaImage**：掛載與卸載，失敗時 `-Discard`。
-- **Invoke-WinMediaExternal**：呼叫 oscdimg 與 wimlib 等外部程式。
+- **Invoke-WinMediaExternal**：呼叫 oscdimg 等外部程式。
+- **Resolve-WinMediaWimlib**：解析 wimlib-imagex 路徑；缺少時先找模組內附的壓縮檔，再下載固定版本 1.14.5，校驗 SHA-256 後解壓。
+- **Invoke-WinMediaWimlib**：wimlib 的唯一呼叫入口，內部經 `Invoke-WinMediaExternal`，非零結束碼即中止。
+- **Install-WinMediaAdk**：ADK 缺少時下載安裝程式，驗證 Microsoft 簽章後以 `/quiet /installpath` 安裝 Deployment Tools。
 - **Test-WinMediaVirtualEdition**：檢查虛擬版本條件與 EditionID。
 - **日誌三件組**：`Write-WinMediaLog`（UTF-8 無 BOM）、`Invoke-WinMediaOperation`（操作紀錄）、`Protect-WinMediaLogValue`（遮罩敏感值）。
 
@@ -58,6 +61,11 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 | 2026-10-14 | 預設 `ResetBase = $false` | 避免無法解除安裝更新 | 需要時須明確開啟 |
 | 2026-10-14 | 虛擬版本以 DISM `/Set-Edition` 實作 | 依 `create_virtual_editions.cmd` | 來源須先轉 WIM；卸載一律 `-Discard` |
 | 2026-10-14 | WorkDir、MountDir、OutputDir 皆可由參數指定；MountDir 預設參照 Convert-UUP.cmd | 使用者需求；Convert-UUP.cmd:4648–4654 掛載於工作磁碟 `MountUUP`（非 NTFS 回退系統碟） | MountDir 空白 = 依 WorkDir 推導；MountDir 非空即中止，不像 Convert-UUP.cmd:1060 直接 rmdir |
+| 2026-10-14 | wimlib 只在 `Wimlib.Path` 非空時用於 ESD→WIM；WIM→ESD 一律使用 wimlib | Learn 未記載 DISM 直接產生 ESD；ESD→WIM 保留 DISM 以減少外部依賴 | `Convert-WinMediaEsdToWim` 分流；`Wimlib.Path` 空白時不改寫，維持 DISM |
+| 2026-10-14 | wimlib 缺少時自動下載固定版本 1.14.5，以論壇公告 SHA-256 校驗 | 使用者需求；校驗碼取自 wimlib 論壇公告（viewtopic.php?t=1133） | 校驗不符即刪除並中止；需網路（僅於本地無檔時） |
+| 2026-10-14 | wimlib 參數與 DISM 指令分開，wimlib 只經 `Invoke-WinMediaWimlib` 呼叫 | 使用者需求：依 wimlib 自身參數執行，不與 DISM 混用 | 僅在 DISM 無對應功能時才使用另一側（目前無此情況） |
+| 2026-10-14 | ADK 缺少時自動安裝 Deployment Tools，安裝程式須為 Microsoft 簽章 | 使用者需求；安裝程式來源為 Microsoft 官方連結 | 需系統管理員權限；Inbox 模式產 WIM 時若需 oscdimg 亦會觸發安裝（不得已） |
+| 2026-10-14 | 驗證閘門：`Tests\Invoke-Validation.ps1` 同時執行 Pester 6.2.0 與 PSScriptAnalyzer，任一失敗即非 0 結束；所有 PowerShell 檔為 CRLF＋UTF-8 BOM | 使用者需求 | 每次修改須執行；測試不連網，以 Mock 代替下載與安裝 |
 | 2026-10-14 | WorkDir 預設為執行腳本所在磁碟根目錄；OutputDir 預設為腳本所在目錄 | 使用者需求（取代先前參照 Convert-UUP 的 WorkDir 預設） | 預設值於入口腳本 `Update-WindowsMedia.ps1` 解析；設定檔兩鍵留空；主流程 WorkDir 為空或非絕對路徑即中止；OutputDir 不做 OneDrive 檢查，腳本位於 OneDrive 內時成品會被同步 |
 
 ### 技術選型
@@ -71,7 +79,7 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 
 - 更新包須手動準備，無法自動判斷是否為最新版本。
 - Windows 10 21H2 無 checkpoint 機制；實機測試需覆蓋兩種母檔狀態。
-- ESD 輸出依賴 wimlib；未安裝時 ESD 模式直接報錯，不退回 DISM。
+- ESD 輸出依賴 wimlib；缺少時自動下載（需網路），下載或校驗失敗即中止，不退回 DISM。`Wimlib.Path` 指定的檔案不存在時同樣自動下載。
 - 虛擬版本的 SPP 檔缺失時中止，不略過。
 
 ### 技術債務
@@ -96,6 +104,7 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 - 每步檢查 DISM 回傳碼，非零即中止。
 - 日誌經 `Protect-WinMediaLogValue` 遮罩敏感值，並有測試覆蓋（`password=abc123` 會被遮罩）。
 - 不呼叫 `dism.exe` 執行操作；靜態掃描未發現 `Invoke-Expression`、`-EncodedCommand` 等高風險模式。
+- wimlib 壓縮檔以論壇公告的 SHA-256 校驗，不符即刪除；ADK 安裝程式須為 Microsoft 簽章，否則刪除並中止。
 
 ## 未決問題
 
@@ -108,7 +117,7 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 5. Setup DU 的版面配置。
 6. 真實更新包的分類結果。
 7. 掛載失敗後的清理。
-8. wimlib 的 ESD 轉換。
+8. wimlib 的 ESD 轉換、自動下載與 ADK 自動安裝（已以 Mock 測試，尚未實機執行）。
 
 ## 變更歷史
 
@@ -129,3 +138,11 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 **變更內容**: WorkDir 預設為執行腳本所在磁碟根目錄；OutputDir 預設為腳本所在目錄。設定檔兩鍵改為空白，預設值於 `Update-WindowsMedia.ps1` 解析；`Invoke-WindowsMediaRefresh` 在使用 WorkDir 前檢查為絕對路徑。
 
 **變更理由**: 使用者需求。取代先前 WorkDir 固定為 `C:\WinMediaWork` 的設定。
+
+### 2026-10-14 - wimlib／ADK 自動取得與驗證閘門
+
+**變更內容**: 新增 `Resolve-WinMediaWimlib`、`Invoke-WinMediaWimlib`、`Install-WinMediaAdk`；`Export-WinMediaEsd` 改經 `Invoke-WinMediaWimlib`；`Convert-WinMediaEsdToWim` 在 `Wimlib.Path` 非空時使用 wimlib，否則維持 DISM Cmdlet；`Resolve-WinMediaAdk` 缺少 DISM 時自動安裝；新增 `Tests\Invoke-Validation.ps1`。
+
+**變更理由**: 使用者需求：手動指定 wimlib 但本地無檔時自動下載，ADK 比照辦理；wimlib 依自身參數執行，與 DISM 分開；每次測試須通過 Pester 與 PSScriptAnalyzer；PowerShell 檔案使用 CRLF。
+
+**驗證結果**: Pester 47 項通過（Windows PowerShell 5.1、Pester 6.2.0）；PSScriptAnalyzer Error／Warning 為 0；所有 `.ps1`／`.psm1`／`.psd1` 為 CRLF＋UTF-8 BOM。實機 ISO 流程仍未驗證。
