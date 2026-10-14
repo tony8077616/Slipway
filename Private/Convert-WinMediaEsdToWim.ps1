@@ -1,5 +1,5 @@
 ﻿function Convert-WinMediaEsdToWim {
-    # install.esd → install.wim（§3.2 步驟 2a、§2.7.3）：全部索引轉換；有 wimlib 則優先使用
+    # install.esd → install.wim（§3.2 步驟 2a、§2.7.3）：全部索引轉換；Config.Wimlib.Path 有指定才走 wimlib，否則走 DISM
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$SourceEsd,
@@ -13,14 +13,12 @@
         } | Out-Null
     }
 
-    $wimlib = $Config.Wimlib.Path
-    if (-not [string]::IsNullOrEmpty($wimlib) -and (Test-Path -LiteralPath $wimlib)) {
-        Write-WinMediaLog -Config $Config -Level Info -Message "使用 wimlib 轉換 ESD：$SourceEsd"
-        $result = Invoke-WinMediaExternal -FilePath $wimlib -ArgumentList @('export', $SourceEsd, 'all', $DestinationWim) -Config $Config
-        if ($result.ExitCode -ne 0) { throw "wimlib export 失敗，結束碼 $($result.ExitCode)" }
+    if (-not [string]::IsNullOrWhiteSpace($Config.Wimlib.Path)) {
+        Write-WinMediaLog -Config $Config -Level Info -Message "使用 wimlib-imagex 轉換 ESD（Wimlib.Path 已指定）：$SourceEsd"
+        Invoke-WinMediaWimlib -ArgumentList @('export', $SourceEsd, 'all', $DestinationWim) -Config $Config | Out-Null
     }
     else {
-        Write-WinMediaLog -Config $Config -Level Info -Message "使用 Export-WindowsImage 轉換 ESD（未設定 wimlib）：$SourceEsd"
+        Write-WinMediaLog -Config $Config -Level Info -Message "使用 DISM Cmdlet 轉換 ESD（未指定 Wimlib.Path）：$SourceEsd"
         $indexes = Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
             Get-WindowsImage -ImagePath $SourceEsd
         }
