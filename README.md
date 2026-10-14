@@ -31,7 +31,7 @@
 ### 第三方工具（已打包）
 
 - `tools/wimlib/wimlib-1.14.5-windows-x86_64-bin.zip`：wimlib 1.14.5 x64 Windows 版，供 ESD 輸出使用。
-  - 來源：<https://wimlib.net/downloads/>（官方頁面未提供校驗碼；`tools/wimlib/SHA256SUMS.txt` 為下載後自行計算的 SHA256）。
+  - 來源：<https://wimlib.net/downloads/>；SHA-256 取自 wimlib 論壇 1.14.5 公告 <https://wimlib.net/forums/viewtopic.php?t=1133>，與 `tools/wimlib/SHA256SUMS.txt` 一致。
   - 授權：ZIP 內含 `COPYING.GPLv3.txt`、`COPYING.LGPL.txt` 等授權檔，依其條款散布。
   - 使用：解壓縮後，將 `Config/Default.psd1` 的 `Wimlib.Path` 設為 `wimlib-imagex.exe` 的絕對路徑。
 - `oscdimg.exe` 與 ADK 的 DISM 不包含於本 repo，屬 Microsoft ADK，須自行安裝。
