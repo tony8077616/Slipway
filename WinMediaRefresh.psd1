@@ -16,7 +16,8 @@
     AliasesToExport   = @()
     PrivateData       = @{
         PSData = @{
-            Tags = @('Windows', 'ISO', 'DISM', 'LTSC', 'Servicing')
+            Tags       = @('Windows', 'ISO', 'DISM', 'LTSC', 'Servicing')
+            LicenseUri = 'https://github.com/tony8077616/WinMediaRefresh/blob/main/LICENSE'
         }
     }
 }

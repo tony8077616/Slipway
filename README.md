@@ -116,6 +116,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Invoke-Validatio
 - 所有 `.ps1`／`.psm1`／`.psd1` 為 CRLF 行尾與 UTF-8 BOM。
 - **尚未驗證**：以實際 Windows ISO 完整跑通流程。`DESIGN.md` 的「未決問題」列出待確認項目，包括 ISO 實機測試、ADK oscdimg 路徑、`Get-WindowsEdition -Target` 屬性名稱與 wimlib ESD 轉換。
 
+## 授權
+
+本專案以 [MIT 授權](LICENSE) 發佈。打包的 wimlib 為 GPLv3／LGPL，依其條款散布，授權檔包含於 `tools/wimlib/` 的壓縮檔內。
+
 ## 相關文檔
 
 - [設計文件](DESIGN.md)
