@@ -3,7 +3,7 @@
 Import-Module -Name (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'WinMediaRefresh.psd1') -Force
 
 Describe 'Test-WinMediaVirtualEdition（§2.7.1、§2.7.7、§2.7.8）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaVirtualEdition {
         It '沒有要求的版本時回傳空陣列' {
             @(Test-WinMediaVirtualEdition -Build 22621 -SourceEditionIds @('EnterpriseS') -RequestedEditions @()).Count | Should -Be 0
         }
@@ -45,7 +45,7 @@ Describe 'Test-WinMediaVirtualEdition（§2.7.1、§2.7.7、§2.7.8）' -Tag 'Un
 }
 
 Describe 'Protect-WinMediaLogValue（§4.1）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaLog {
         It '遮蔽 --proxy-user 後的值' {
             Protect-WinMediaLogValue -Value 'curl --proxy-user bob:hunter2 http://x' | Should -Be 'curl --proxy-user *** http://x'
         }
@@ -95,7 +95,7 @@ Describe 'Config/Default.psd1 設定鍵（§3.1）' -Tag 'Unit' {
 }
 
 Describe 'Resolve-WinMediaMountDir（Convert-UUP.cmd:4648–4654）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaPath {
         It '指定 MountDir 時原樣使用（去除尾端反斜線）' {
             Resolve-WinMediaMountDir -WorkDir 'C:\WinMediaWork' -MountDir 'E:\Mnt\' | Should -Be 'E:\Mnt'
         }
@@ -107,13 +107,13 @@ Describe 'Resolve-WinMediaMountDir（Convert-UUP.cmd:4648–4654）' -Tag 'Unit'
 
         It '工作目錄所在磁碟為 NTFS 時，預設為該磁碟根目錄\MountUUP' {
             $other = if ($env:SystemDrive -ieq 'Z:') { 'Y:' } else { 'Z:' }
-            Mock -ModuleName WinMediaRefresh Get-Volume { [pscustomobject]@{ FileSystem = 'NTFS' } }
+            Mock -ModuleName WinMediaPath Get-Volume { [pscustomobject]@{ FileSystem = 'NTFS' } }
             Resolve-WinMediaMountDir -WorkDir "$other\WinMediaWork" -MountDir '' | Should -Be "$other\MountUUP"
         }
 
         It '工作目錄所在磁碟非 NTFS 時，回退到系統碟\MountUUP' {
             $other = if ($env:SystemDrive -ieq 'Z:') { 'Y:' } else { 'Z:' }
-            Mock -ModuleName WinMediaRefresh Get-Volume { [pscustomobject]@{ FileSystem = 'FAT32' } }
+            Mock -ModuleName WinMediaPath Get-Volume { [pscustomobject]@{ FileSystem = 'FAT32' } }
             Resolve-WinMediaMountDir -WorkDir "$other\WinMediaWork" -MountDir '' | Should -Be ($env:SystemDrive + '\MountUUP')
         }
 
@@ -134,9 +134,7 @@ Describe 'Invoke-WindowsMediaRefresh -WhatIf' -Tag 'Unit' {
         $script:config.OperationLog = Join-Path -Path $script:config.LogDir -ChildPath 'OperationLog.txt'
     }
 
-    It 'WorkDir 為空或相對路徑時中止，不進入後續步驟' {
-        { Invoke-WindowsMediaRefresh -SourceIso 'D:\nonexistent.iso' -Config $script:config -Confirm:$false } |
-            Should -Throw '*WorkDir 必須為絕對路徑*'
+    It 'WorkDir 為相對路徑時中止，不進入後續步驟（空白則套用工具磁碟根目錄預設值）' {
         $relative = $script:config.Clone()
         $relative.WorkDir = 'work'
         { Invoke-WindowsMediaRefresh -SourceIso 'D:\nonexistent.iso' -Config $relative -Confirm:$false } |

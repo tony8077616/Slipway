@@ -8,7 +8,12 @@ logs/
 .vs/
 *.user
 
-# 工具目錄內的非發布檔（僅保留 zip 與 SHA256SUMS）
-tools/wimlib/*
-!tools/wimlib/*.zip
-!tools/wimlib/SHA256SUMS.txt
+
+# 本機與 e2e 產物（不發布）
+Packages/
+Drivers/
+Lang/
+Lxp/
+Fod/
+StoreApps/
+Config/local.psd1

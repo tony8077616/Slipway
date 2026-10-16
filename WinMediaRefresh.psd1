@@ -17,7 +17,7 @@
     PrivateData       = @{
         PSData = @{
             Tags       = @('Windows', 'ISO', 'DISM', 'LTSC', 'Servicing')
-            LicenseUri = 'https://github.com/tony8077616/WinMediaRefresh/blob/main/LICENSE'
+            LicenseUri = 'https://github.com/tony8077616/Slipway/blob/main/LICENSE'
         }
     }
 }
