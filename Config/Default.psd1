@@ -9,6 +9,7 @@
     ResetBase            = $false
     ResetBaseOS          = $false
     OutputFormat         = 'WIM'                 # 'WIM' 或 'ESD'
+    WinPEUpdate          = 'SafeOS'              # WinPE（WinRE／boot.wim）核心更新路線：'SafeOS'＝套用 SafeOS DU（已 e2e 驗證，預設）；'Lcu'＝convert-UUP 路線（WinRE 只套 SSU，boot.wim 套最新 LCU；目前實測無法提升核心版本，守衛會中止）
     UpdateBootFiles      = $true                 # 選項 B（convert-UUP UpdtBootFiles）：改用安裝映像內的 *_EX 開機檔（bootx64、bootmgr、efisys、memtest、boot.stl、fonts、cipolicies）；注意為 UEFI CA 2023 開機檔，韌體 db 沒有 2023 CA 的機器開啟 Secure Boot 可能無法開機
     Wimlib               = @{ Path = '' }        # 非空 = 手動指定 wimlib-imagex.exe，ESD 轉換改用 wimlib；檔案不存在時自動下載 1.14.5（SHA-256 校驗）；空白 = ESD→WIM 用 DISM，WIM→ESD 自動下載至 %LOCALAPPDATA%
     DismProvider         = 'Inbox'               # 'Inbox' 或 'ADK'，見 §3.4
