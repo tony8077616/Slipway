@@ -292,6 +292,8 @@
     # 步驟 6：install.wim 各索引；WinRE 複製到每個索引（§3.2 step 5）
     # 選項 UpdateBootFiles 使用 _EX 開機檔時，$bootEx.Applied 為 $true，步驟 9 據此跳過 WinPE 的開機管理員覆寫（每個目標檔只有一個來源）
     $bootEx = @{ Applied = $false }
+    # 第一個目標索引的 ntoskrnl 版本，供步驟 9 的守衛比對（LCU 未套用到開機索引時會被發現）
+    $installKernel = @{ Version = $null }
     foreach ($index in $targets) {
         Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) -Config $Config -Action {
             param($mounted)
@@ -325,6 +327,13 @@
             Install-WinMediaStoreApp -MountPath $mounted -Set $storeSet -Config $Config
             if ($lxpItems.Count -gt 0) { Install-WinMediaLxp -MountPath $mounted -Lxp $lxpItems -Config $Config }
             if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Install' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
+            if ($index -eq $targets[0]) { $installKernel.Version = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion }
+            # 媒體 sources\xmllite.dll 取自第一個目標索引、已套用 LCU 的版本（convert-UUP 取自 metadata ESD 索引 3，此處沒有該來源）
+            if ($index -eq $targets[0]) {
+                Invoke-WinMediaOperation -Category File -Operation 'CopyXmlLite' -Target $sourcesDir -Config $Config -ScriptBlock {
+                    Copy-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\xmllite.dll') -Destination (Join-Path -Path $sourcesDir -ChildPath 'xmllite.dll') -Force
+                } | Out-Null
+            }
             Invoke-WinMediaOperation -Category File -Operation 'ReplaceWinRE' -Target $mounted -Config $Config -ScriptBlock {
                 Copy-Item -LiteralPath $winreWim -Destination (Join-Path -Path $mounted -ChildPath 'Windows\System32\Recovery\winre.wim') -Force
             } | Out-Null
@@ -355,19 +364,26 @@
     $bootWimList = Join-Path -Path $PSScriptRoot -ChildPath '..\Config\bootwim.txt'
     $bootMuiList = Join-Path -Path $PSScriptRoot -ChildPath '..\Config\bootmui.txt'
 
+    # 步驟 8.5：boot.wim 以已套用 SSU／SafeOS DU 的 WinRE 重建（convert-UUP 在 temp\winre.wim 更新後才複製為 boot.wim）；WinPE 核心版本由 SafeOS DU 決定，未更新的副本會停在 9444
+    $archName = if ($architecture -in 'amd64', 'x64') { 'x64' } else { $architecture }
+    New-WinMediaBootWimFromWinRE -WinreWim $winreWim -BootWim $bootWim -MediaDir $mediaDir -ArchName $archName -Config $Config
+
     # 步驟 9：boot.wim 索引 1 與 2（§3.2 step 7、8）
     foreach ($bootIndex in 1, 2) {
         Mount-WinMediaImage -ImagePath $bootWim -Index $bootIndex -MountPath (Join-Path -Path $mountDir -ChildPath ('boot-{0}' -f $bootIndex)) -Config $Config -Action {
             param($mounted)
+            # 不單獨加入 SSU：獨立加入的 SSU 會被暫停（pended），其後的 LCU 會被略過、CBS 停留在 9441；LCU 套件本身已含 SSU（實測單獨加入即升至 9711）
+            # 直接套用目標 LCU msu（資料夾模式會先處理較舊的 checkpoint msu，實測 KB5043080 回 0x80070228）
+            # shortcut: 目前開機索引的 WinPE 核心版本來自 SafeOS DU（步驟 5），LCU RollupFix 9711.1.30 實測不會寫入開機索引（ntoskrnl 不因此變動）；保留此呼叫待使用者決定 SafeOS 或 LCU 路線（convert-UUP SSU→Commit→LCU）
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $ssu | Out-Null
-            }
-            Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $lcuStage | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target | Out-Null
             }
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
                 Repair-WindowsImage -Path $mounted -StartComponentCleanup | Out-Null
             }
+            # 守衛：開機索引的 ntoskrnl 必須與安裝映像一致（只比核心版本，無法區分 SafeOS DU 與 LCU 是否套用）；不一致時中止
+            $bootKernel = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
+            if ($bootKernel -ne $installKernel.Version) { throw "boot.wim 索引 $bootIndex 未套用 LCU：ntoskrnl $bootKernel，安裝映像 $($installKernel.Version)。" }
             if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Boot' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
             if ($bootIndex -eq 2) {
                 # 第 28 列 boot manager：自 WinPE 覆蓋媒體上的同名檔案，須排在 setup／setuphost 覆蓋之後
@@ -399,9 +415,12 @@
     }
 
     # 步驟 9 之後（兩個索引皆已卸載）：媒體 sources\ 以 wimlib update 覆蓋 WinPE 索引 2 的同名檔（convert-UUP boot-wim.txt；媒體 → WinPE，方向與 MS 文件第 27 列相反，見 README）
+    # 放在 LCU 之後，避免 LCU 把這些檔案蓋回去
     $syncLanguages = Get-WinMediaEffectiveLanguage -MediaDir $mediaDir -Languages @($Config.Languages)
     Write-WinMediaLog -Config $Config -Level Info -Message ('WinPE 同步語言：{0}' -f ($syncLanguages -join ', '))
     Copy-WinMediaBootWimSources -MediaDir $mediaDir -WimPath $bootWim -Index 2 -WimListPath $bootWimList -MuiListPath $bootMuiList -Languages $syncLanguages -Config $Config
+    # convert-UUP 1165 行：boot.wim 更新完成後刪除媒體 sources\xmllite.dll（參考成品的媒體根目錄沒有此檔）
+    Remove-Item -LiteralPath (Join-Path -Path $sourcesDir -ChildPath 'xmllite.dll') -Force -ErrorAction SilentlyContinue
 
     # 步驟 9 之後：boot.wim export（--boot）與 optimize，對應 convert-UUP 的 wimlib export／optimize
     Compress-WinMediaBootWim -BootWim $bootWim -Config $Config
