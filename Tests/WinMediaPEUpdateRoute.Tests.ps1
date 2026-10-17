@@ -30,10 +30,10 @@ Describe 'WinPEUpdate 路線選項（SafeOS 為預設；Lcu 為 convert-UUP 路�
         $script:defaults.WinPEUpdate | Should -Be 'SafeOS'
     }
 
-    It 'SafeOS DU 只在 WinPEUpdate 為 SafeOS 時套用到 WinRE' {
+    It 'SafeOS DU 於 WinRE 套用，且守衛不依 WinPEUpdate 分岔' {
         $calls = @(Get-AddPackageGuard -PackagePathVariable 'safeOs')
         $calls.Count | Should -Be 1
-        $calls[0].Guard | Should -Match "WinPEUpdate -eq 'SafeOS'"
+        $calls[0].Guard | Should -Not -Match 'WinPEUpdate'
     }
 
     It '最新 LCU（cumulative.Target）只在 WinPEUpdate 為 Lcu 時套用到開機索引' {

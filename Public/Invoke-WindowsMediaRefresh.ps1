@@ -39,7 +39,7 @@
         '3 偵測 build 與索引',
         '4 下載更新包（僅於設定 Download.Build 或 Download.KB 時）；分類 PackageDir（缺 SSU 或 LCU 即中止；目標與 checkpoint 經 WorkDir\update-stage 注入）',
         '4a 虛擬版本條件（§2.7.1、§2.7.7）',
-        '5 WinRE：取索引 1 的 winre.wim → SSU → SafeOS DU（WinPEUpdate 為 SafeOS 且有）→ cleanup（不套 LCU，§11.8 2a）→ 驅動（若設定，WinRE 目標）',
+        '5 WinRE：取索引 1 的 winre.wim → SSU → SafeOS DU（有則套用）→ cleanup（不套 LCU，§11.8 2a）→ 驅動（若設定，WinRE 目標）',
         '6 install.wim 各索引：SSU → 語言包與 FoD → 最新 LCU（含 checkpoint）→ cleanup（CBS 待處理只警告）→ NetFx3 → .NET CU → 移除 Appx（若設定）→ 加入 LXP → 驅動 → 放入 WinRE → 選項 UpdateBootFiles（預設開）時取用已套用 LCU 映像的 _EX 開機檔',
         '7 虛擬版本（僅來源為 EnterpriseS 且在 Indexes 目標內；§2.7.4）',
         '8 展開 Setup DU 到 sources（第 26 列）',
@@ -54,7 +54,7 @@
 
     # 參數覆寫設定檔；LogDir 與 OperationLog 跟隨 WorkDir
     $Config = $Config.Clone()
-    # 自訂設定檔可能沒有此鍵；缺少時採預設路線（步驟 5 以 -eq 'SafeOS' 判斷，$null 會跳過 SafeOS）
+    # 自訂設定檔可能沒有此鍵；缺少時採預設路線 SafeOS（驗證不接受 $null）
     if (-not $Config.ContainsKey('WinPEUpdate')) { $Config.WinPEUpdate = 'SafeOS' }
     # 空白 = 腳本所在磁碟根目錄\WinMediaWork，避免直接放在系統磁碟區根目錄（除非腳本本身位於 C 槽）
     if (-not $WorkDir -and [string]::IsNullOrWhiteSpace($Config.WorkDir)) {
@@ -281,7 +281,7 @@
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
             Add-WindowsPackage -Path $mounted -PackagePath $ssu | Out-Null
         }
-        if ($safeOs -and $Config.WinPEUpdate -eq 'SafeOS') {
+        if ($safeOs) {
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
                 Add-WindowsPackage -Path $mounted -PackagePath $safeOs | Out-Null
             }
@@ -377,7 +377,7 @@
             param($mounted)
             # 不單獨加入 SSU：獨立加入的 SSU 會被暫停（pended），其後的 LCU 會被略過、CBS 停留在 9441；LCU 套件本身已含 SSU（實測單獨加入即升至 9711）
             # 直接套用目標 LCU msu（資料夾模式會先處理較舊的 checkpoint msu，實測 KB5043080 回 0x80070228）
-            # SafeOS 路線不在此套 LCU：核心版本已由步驟 5 的 SafeOS DU 提供，實測 RollupFix 不改變開機索引的 ntoskrnl
+            # 只有 Lcu 路線在此以原始 MSU 直接加入 LCU；實測 DISM 判定 Not applicable（無效果），SafeOS 路線的核心版本由步驟 5 的 SafeOS DU 提供
             if ($Config.WinPEUpdate -eq 'Lcu') {
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
                     Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target | Out-Null
