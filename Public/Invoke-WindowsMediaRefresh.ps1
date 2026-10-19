@@ -283,10 +283,11 @@
     } | Out-Null
 
     # WinRE 套用 SafeOS DU 後的 ntoskrnl 版本，供步驟 9 守衛判斷開機索引是否取自已更新的 WinRE
-    $winreKernel = @{ Version = $null }
+    $winreKernel = @{ Base = $null; Version = $null }
     Mount-WinMediaImage -ImagePath $winreWim -Index 1 -MountPath (Join-Path -Path $mountDir -ChildPath 'winre') -Config $Config -Action {
         param($mounted)
         Write-WinMediaLog -Config $Config -Level Verbose -Message "WinRE 掛載點：$mounted"
+        $winreKernel.Base = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
             Add-WindowsPackage -Path $mounted -PackagePath $ssu -LogLevel $Config.DismLogLevel | Out-Null
         }
@@ -397,7 +398,7 @@
                 Repair-WindowsImage -Path $mounted -StartComponentCleanup -LogLevel $Config.DismLogLevel | Out-Null
             }
             $bootKernel = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
-            Test-WinMediaKernelConsistency -BootKernel $bootKernel -WinreKernel $winreKernel.Version -InstallKernel $installKernel.Version -SafeOsApplied ([bool]$safeOs) -BootIndex $bootIndex
+            Test-WinMediaKernelConsistency -BootKernel $bootKernel -WinreKernel $winreKernel.Version -InstallKernel $installKernel.Version -WinreBaseKernel $winreKernel.Base -BootIndex $bootIndex
             if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Boot' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
             if ($bootIndex -eq 2) {
                 # 第 28 列 boot manager：自 WinPE 覆蓋媒體上的同名檔案，須排在 setup／setuphost 覆蓋之後
