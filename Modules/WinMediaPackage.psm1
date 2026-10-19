@@ -39,6 +39,7 @@ function Get-WinMediaPackageCategory {
         Checkpoint   = @()
         LCU          = @()
         SetupDU      = @()
+        Enablement   = @()
         DotNetCU     = @()
         LanguagePack = @()
         FoD          = @()
@@ -71,6 +72,13 @@ function Get-WinMediaPackageCategory {
             'DotNetCU'     { $result.DotNetCU += $package.FullName }
             'LanguagePack' { $result.LanguagePack += $package.FullName }
             'FoD'          { $result.FoD += $package.FullName }
+            'Enablement'   {
+                # 26H2 啟用套件（eKB）：母檔已含對應功能，略過不套用；版本取自 cab 內的啟用套件 mum 檔名
+                $result.Enablement += $package.FullName
+                $enableMum = Get-ChildItem -LiteralPath (Join-Path -Path $ExpandDir -ChildPath $package.Name) -Recurse -File -Filter '*-Version-Enablement-Package~*.mum' | Select-Object -First 1
+                $version = if ($enableMum -and $enableMum.Name -match '~(\d+\.\d+\.\d+\.\d+)\.mum$') { $Matches[1] } else { '未知' }
+                Write-WinMediaLog -Config $Config -Level Info -Message "26H2 啟用套件略過（母檔已含對應功能，不套用）：$($package.Name)，cab 版本 $version。"
+            }
             default        { $result.Unclassified += $package.FullName }
         }
     }
@@ -197,6 +205,8 @@ function Get-WinMediaPackageCategoryByContent {
     if ($mumText -match 'Package_for_DotNetRollup') { return 'DotNetCU' }
     if ($hasSsu) { return 'SSU' }
     if ($manifests | Where-Object { $_ -like 'lp.cab' -or $_ -like '*LXP*' }) { return 'LanguagePack' }
+    # 啟用套件（eKB）：其他規則都不命中才判斷，且需有 update.mum，避免 CU 內含的 manifest 被誤判
+    if ($mum -and ($manifests | Where-Object { $_ -like '*-Version-Enablement-Package~*.mum' })) { return 'Enablement' }
 
     return 'Unknown'
 }
