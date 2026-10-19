@@ -76,4 +76,11 @@ Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
         }
         $missing | Should -BeNullOrEmpty
     }
+
+    # 舊設定檔相容：缺 DismLogLevel 時主流程以 WarningsInfo 補上（靜態檢查，主流程需要真實映像無法直接執行）
+    It '主流程在 DismLogLevel 缺鍵時以 WarningsInfo 補上預設值' {
+        $main = Get-Content -LiteralPath (Join-Path -Path $script:root -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1') -Raw
+        $main | Should -Match "if \(-not \`$Config\.ContainsKey\('DismLogLevel'\)\) \{ \`$Config\.DismLogLevel = 'WarningsInfo' \}"
+        $main.IndexOf("ContainsKey('DismLogLevel')") | Should -BeLessThan $main.IndexOf("-notcontains `$Config.DismLogLevel")
+    }
 }

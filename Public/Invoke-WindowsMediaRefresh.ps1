@@ -71,6 +71,8 @@
     }
     if ($MountDir) { $Config.MountDir = $MountDir }
     if ($OutputDir) { $Config.OutputDir = $OutputDir }
+    # 舊設定檔可能沒有 DismLogLevel：缺鍵時用預設值，避免 StrictMode 下讀取缺少的鍵直接拋錯
+    if (-not $Config.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = 'WarningsInfo' }
     if ($PSBoundParameters.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = $DismLogLevel }
     if ('Errors', 'Warnings', 'WarningsInfo', 'Debug' -notcontains $Config.DismLogLevel) {
         throw "DismLogLevel 必須為 Errors／Warnings／WarningsInfo／Debug 其中之一（名稱，不是數字），目前為：'$($Config.DismLogLevel)'。"
