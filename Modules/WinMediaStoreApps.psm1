@@ -69,7 +69,7 @@ function Install-WinMediaStoreApp {
         $depArg = if (@($Set.Frameworks).Count -gt 0) { @{ DependencyPackagePath = @($Set.Frameworks) } } else { @{} }
         Write-WinMediaLog -Config $Config -Level Info -Message "注入 StoreApps：$(Split-Path -Path $app -Leaf)"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-AppxProvisionedPackage -Path $MountPath -PackagePath $app @licenseArg @depArg -ErrorAction Stop | Out-Null
+            Add-AppxProvisionedPackage -Path $MountPath -PackagePath $app @licenseArg @depArg -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
         } | Out-Null
     }
 }

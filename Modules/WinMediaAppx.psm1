@@ -45,7 +45,7 @@ function Remove-WinMediaAppx {
         'Microsoft.MPEG2VideoExtension'
     )
     $all = @(Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-        Get-AppxProvisionedPackage -Path $MountPath
+        Get-AppxProvisionedPackage -Path $MountPath -LogLevel $Config.DismLogLevel
     })
     foreach ($pkg in $all) {
         # PackageName 為 PackageFullName（Name_Version_Arch_ResourceId_PublisherId），取最後一段組成 PFN，與清單精確比對
@@ -56,7 +56,7 @@ function Remove-WinMediaAppx {
         if (-not $remove) { continue }
         $name = $pkg.PackageName
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Remove-AppxProvisionedPackage -Path $MountPath -PackageName $name -ErrorAction Stop | Out-Null
+            Remove-AppxProvisionedPackage -Path $MountPath -PackageName $name -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
         } | Out-Null
         Write-WinMediaLog -Config $Config -Level Info -Message "已移除 provisioned app：$pfn"
     }

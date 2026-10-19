@@ -137,7 +137,7 @@ Describe 'Install-WinMediaDriver（§3.1、§5.4）' -Tag 'Unit' {
             Mock Write-WinMediaLog { }
             Mock Invoke-WinMediaDism { param([scriptblock]$ScriptBlock) & $ScriptBlock }
             Mock Add-WindowsDriver { param($Path, $Driver, [switch]$Recurse, [switch]$ForceUnsigned) $null = $Path, $Driver, $Recurse, $ForceUnsigned }
-            $script:cfg = @{ LogLevel = 'Info'; DismProvider = 'Inbox'; Drivers = @{ ForceUnsigned = $false } }
+            $script:cfg = @{ LogLevel = 'Info'; DismProvider = 'Inbox'; DismLogLevel = 'Debug'; Drivers = @{ ForceUnsigned = $false } }
             $script:root = Join-Path -Path $TestDrive -ChildPath ('set-' + [guid]::NewGuid().ToString('N'))
             foreach ($state in 'ALL', 'WinPE', 'OS') {
                 New-Item -ItemType Directory -Path (Join-Path -Path $script:root -ChildPath $state) -Force | Out-Null

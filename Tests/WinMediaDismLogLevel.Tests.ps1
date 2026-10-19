@@ -59,4 +59,21 @@ Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
         $calls.Count | Should -Be $Expected
         @($calls | Where-Object { $_.Line -match '-LogLevel \$Config\.DismLogLevel' }).Count | Should -Be $Expected
     }
+
+    # 全模組掃描：不手列 cmdlet，改由 Dism 模組取得完整清單，任何非測試檔的 DISM 呼叫缺 -LogLevel 即失敗
+    It '所有非測試模組的 DISM cmdlet 呼叫都含 -LogLevel $Config.DismLogLevel' {
+        Import-Module -Name DISM -ErrorAction Stop
+        $names = (Get-Command -Module DISM).Name -join '|'
+        $files = Get-ChildItem -LiteralPath @((Join-Path -Path $script:root -ChildPath 'Public'), (Join-Path -Path $script:root -ChildPath 'Modules'), (Join-Path -Path $script:root -ChildPath 'PSModules')) -Recurse -Include '*.ps1', '*.psm1' |
+            Where-Object { $_.FullName -notmatch '\\Tests\\' }
+        $missing = @()
+        foreach ($file in $files) {
+            $n = 0
+            foreach ($line in (Get-Content -LiteralPath $file.FullName)) {
+                $n++
+                if ($line -match "^\s*($names)\b" -and $line -notmatch '-LogLevel \$Config\.DismLogLevel') { $missing += ('{0}:{1}' -f $file.Name, $n) }
+            }
+        }
+        $missing | Should -BeNullOrEmpty
+    }
 }

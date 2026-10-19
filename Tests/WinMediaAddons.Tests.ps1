@@ -75,7 +75,7 @@ Describe 'LXP 偵測與加入（§3.2、§5.5、§5.6）' -Tag 'Unit' {
             Mock Invoke-WinMediaDism { param([scriptblock]$ScriptBlock) & $ScriptBlock }
             Mock Add-AppxProvisionedPackage { param($Path, $PackagePath, $LicensePath, $Regions) $null = $Path, $PackagePath, $LicensePath, $Regions }
             $item = [pscustomobject]@{ PackagePath = 'C:\x.appx'; LicensePath = 'C:\x.xml'; Pfn = 'P' }
-            Install-WinMediaLxp -MountPath 'M:\m' -Lxp @($item) -Config @{ DismProvider = 'Inbox'; LogLevel = 'Info' }
+            Install-WinMediaLxp -MountPath 'M:\m' -Lxp @($item) -Config @{ DismProvider = 'Inbox'; LogLevel = 'Info'; DismLogLevel = 'Debug' }
             Should -Invoke Add-AppxProvisionedPackage -Times 1 -Exactly -ParameterFilter {
                 $Path -eq 'M:\m' -and $PackagePath -eq 'C:\x.appx' -and $LicensePath -eq 'C:\x.xml' -and $Regions -eq 'all'
             }
@@ -130,7 +130,7 @@ Describe 'Appx 移除（§3.3、§5.8）' -Tag 'Unit' {
                     [pscustomobject]@{ DisplayName = 'Microsoft.HEVCVideoExtension'; PackageName = 'Microsoft.HEVCVideoExtension_2.0_x64__8wekyb3d8bbwe' }
                 )
             }
-            $script:cfg = @{ LogLevel = 'Info'; DismProvider = 'Inbox' }
+            $script:cfg = @{ LogLevel = 'Info'; DismProvider = 'Inbox'; DismLogLevel = 'Debug' }
         }
 
         It 'Remove 模式只移除清單內的 app' {

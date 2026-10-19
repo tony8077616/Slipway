@@ -2,7 +2,7 @@
 
 BeforeAll {
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaStoreApps.psm1') -Force
-    $script:config = @{ DismProvider = 'Inbox'; DebugTrace = 0; OperationLog = ''; LogFile = (Join-Path -Path $TestDrive -ChildPath 'storeapps.log'); LogLevel = 'Info' }
+    $script:config = @{ DismProvider = 'Inbox'; DebugTrace = 0; OperationLog = ''; LogFile = (Join-Path -Path $TestDrive -ChildPath 'storeapps.log'); LogLevel = 'Info'; DismLogLevel = 'Debug' }
     $script:msSubject = 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
 }
 
