@@ -433,7 +433,7 @@ function New-WinMediaBootWimFromWinRE {
 }
 
 function Test-WinMediaKernelConsistency {
-    # 步驟 9 守衛：開機索引 ntoskrnl 須等於安裝映像，或等於已套用 SafeOS DU 的 WinRE（Microsoft「用最近版本」規則，不要求與 LCU 同版）；其餘情況中止
+    # 步驟 9 守衛：開機索引 ntoskrnl 須等於安裝映像，或等於已生效（核心異於 WinRE 基準版）SafeOS DU 的 WinRE（Microsoft「用最近版本」規則，不要求與 LCU 同版）；其餘情況中止
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$BootKernel,
