@@ -2,7 +2,7 @@
 
 BeforeAll {
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaLangFod.psm1') -Force
-    $script:config = @{ Languages = @('ja-JP', 'zh-TW'); DebugTrace = 0; OperationLog = ''; LogFile = (Join-Path -Path $TestDrive -ChildPath 'langfod.log'); LogLevel = 'Info'; DismProvider = 'Inbox' }
+    $script:config = @{ Languages = @('ja-JP', 'zh-TW'); DebugTrace = 0; OperationLog = ''; LogFile = (Join-Path -Path $TestDrive -ChildPath 'langfod.log'); LogLevel = 'Info'; DismProvider = 'Inbox'; DismLogLevel = 'WarningsInfo' }
 
     # 測試資料：語言包（一個保留、一個非設定語言、一個無語言標籤、一個非 .cab）
     $script:langDir = Join-Path -Path $TestDrive -ChildPath 'Lang'

@@ -19,6 +19,8 @@
         掛載目錄，覆寫 Config.MountDir；未指定且設定檔為空時，依 Convert-UUP.cmd 規則產生預設值（見 Resolve-WinMediaMountDir）。
     .PARAMETER OutputDir
         成品輸出目錄，覆寫 Config.OutputDir；未指定且設定檔為空時與 WorkDir 相同（Convert-UUP.cmd 輸出於工作目錄）。
+    .PARAMETER DismLogLevel
+        DISM cmdlet 的 -LogLevel 名稱（Errors／Warnings／WarningsInfo／Debug），覆寫 Config.DismLogLevel；未指定則用設定檔值。
     .EXAMPLE
         Invoke-WindowsMediaRefresh -SourceIso 'D:\Win11.iso' -Config $config -WhatIf
     #>
@@ -29,7 +31,8 @@
         [switch]$Force,
         [string]$WorkDir,
         [string]$MountDir,
-        [string]$OutputDir
+        [string]$OutputDir,
+        [ValidateSet('Errors', 'Warnings', 'WarningsInfo', 'Debug')][string]$DismLogLevel
     )
 
     $steps = @(
@@ -68,6 +71,10 @@
     }
     if ($MountDir) { $Config.MountDir = $MountDir }
     if ($OutputDir) { $Config.OutputDir = $OutputDir }
+    if ($PSBoundParameters.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = $DismLogLevel }
+    if ('Errors', 'Warnings', 'WarningsInfo', 'Debug' -notcontains $Config.DismLogLevel) {
+        throw "DismLogLevel 必須為 Errors／Warnings／WarningsInfo／Debug 其中之一（名稱，不是數字），目前為：'$($Config.DismLogLevel)'。"
+    }
     $Config.MountDir = Resolve-WinMediaMountDir -WorkDir $Config.WorkDir -MountDir $Config.MountDir
     # 空白 = 工具所在磁碟根目錄\WinMediaOut（與 WorkDir 並列，不在 OneDrive 內，不受第 12 步清理影響）
     if ([string]::IsNullOrWhiteSpace($Config.OutputDir)) {
@@ -276,15 +283,15 @@
         param($mounted)
         Write-WinMediaLog -Config $Config -Level Verbose -Message "WinRE 掛載點：$mounted"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsPackage -Path $mounted -PackagePath $ssu | Out-Null
+            Add-WindowsPackage -Path $mounted -PackagePath $ssu -LogLevel $Config.DismLogLevel | Out-Null
         }
         if ($safeOs) {
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $safeOs | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $safeOs -LogLevel $Config.DismLogLevel | Out-Null
             }
         }
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:([bool]$Config.ResetBase) | Out-Null
+            Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:([bool]$Config.ResetBase) -LogLevel $Config.DismLogLevel | Out-Null
         }
         if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'WinRE' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
     } | Out-Null
@@ -296,18 +303,18 @@
         Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) -Config $Config -Action {
             param($mounted)
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $ssu | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $ssu -LogLevel $Config.DismLogLevel | Out-Null
             }
             # 文件步驟 10–11：語言包與 FoD 必須在最新 LCU 之前注入
             Install-WinMediaLangFod -MountPath $mounted -Set $langFod -Config $Config
             # 文件步驟 13：最新 LCU（連同前置 checkpoint，經暫存資料夾）
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $lcuStage | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $lcuStage -LogLevel $Config.DismLogLevel | Out-Null
             }
             # 文件步驟 14：cleanup；CBS_E_PENDING（0x800F0806）只警告，其他錯誤照常中止（Mount-WinMediaImage 失敗時會 Discard）
             try {
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Repair-WindowsImage -Path $mounted -StartComponentCleanup | Out-Null
+                    Repair-WindowsImage -Path $mounted -StartComponentCleanup -LogLevel $Config.DismLogLevel | Out-Null
                 } | Out-Null
             }
             catch {
@@ -318,7 +325,7 @@
             Install-WinMediaDeferredFod -MountPath $mounted -Set $langFod -Config $Config
             if ($dotNet) {
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Add-WindowsPackage -Path $mounted -PackagePath $dotNet | Out-Null
+                    Add-WindowsPackage -Path $mounted -PackagePath $dotNet -LogLevel $Config.DismLogLevel | Out-Null
                 }
             }
             if ($appxList) { Remove-WinMediaAppx -MountPath $mounted -AppxList $appxList -Config $Config }
@@ -360,13 +367,13 @@
         Mount-WinMediaImage -ImagePath $bootWim -Index $bootIndex -MountPath (Join-Path -Path $mountDir -ChildPath ('boot-{0}' -f $bootIndex)) -Config $Config -Action {
             param($mounted)
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $ssu | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $ssu -LogLevel $Config.DismLogLevel | Out-Null
             }
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $lcuStage | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $lcuStage -LogLevel $Config.DismLogLevel | Out-Null
             }
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Repair-WindowsImage -Path $mounted -StartComponentCleanup | Out-Null
+                Repair-WindowsImage -Path $mounted -StartComponentCleanup -LogLevel $Config.DismLogLevel | Out-Null
             }
             if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Boot' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
             if ($bootIndex -eq 2) {
@@ -409,7 +416,7 @@
     # 步驟 10：移除來源 EnterpriseS（僅在設定開啟且已建立虛擬版本時，§2.7.6）
     if ($Config.DeleteSourceEdition -and $virtualEditions.Count -gt 0 -and $ltscIndex) {
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Remove-WindowsImage -ImagePath $installWim -Index $ltscIndex.ImageIndex | Out-Null
+            Remove-WindowsImage -ImagePath $installWim -Index $ltscIndex.ImageIndex -LogLevel $Config.DismLogLevel | Out-Null
         } | Out-Null
     }
 
@@ -417,7 +424,7 @@
     $eiCfg = Join-Path -Path $sourcesDir -ChildPath 'ei.cfg'
     $userEiCfg = Join-Path -Path $Config.PackageDir -ChildPath 'ei.cfg'
     $finalCount = @(Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-        Get-WindowsImage -ImagePath $installWim
+        Get-WindowsImage -ImagePath $installWim -LogLevel $Config.DismLogLevel
     }).Count
     if ($finalCount -gt 1) {
         if (Test-Path -LiteralPath $userEiCfg) {

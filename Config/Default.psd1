@@ -16,6 +16,7 @@
     VirtualEditions      = @()                   # 例：@('IoTEnterpriseS')，見 §2.7
     DeleteSourceEdition  = $false                # 建立虛擬版本後是否刪除 EnterpriseS，見 §2.7.6
     LogLevel             = 'Info'
+    DismLogLevel         = 'WarningsInfo'        # DISM cmdlet 的 -LogLevel：Errors / Warnings / WarningsInfo / Debug（名稱，不是數字）；測試時用 Debug
     DebugTrace           = 0                     # 0/1/2/3，見 §4
     Drivers = @{
         Path          = ''          # 含 ALL／WinPE／OS 子資料夾的獨立資料夾；空白 = 執行腳本所在目錄\Drivers（不存在則停用）；ALL＝WinRE＋Install＋Boot，WinPE＝WinRE＋Boot，OS＝Install

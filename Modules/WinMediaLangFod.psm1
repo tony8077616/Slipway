@@ -85,7 +85,7 @@ function Install-WinMediaDeferredFod {
     foreach ($package in @($Set.Deferred)) {
         Write-WinMediaLog -Config $Config -Level Info -Message "注入 cleanup 後的 FoD：$(Split-Path -Path $package -Leaf)"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsPackage -Path $MountPath -PackagePath $package | Out-Null
+            Add-WindowsPackage -Path $MountPath -PackagePath $package -LogLevel $Config.DismLogLevel | Out-Null
         } | Out-Null
     }
 }
@@ -104,7 +104,7 @@ function Install-WinMediaLangFod {
     foreach ($package in @($Set.LangPacks) + @($Set.Fod)) {
         Write-WinMediaLog -Config $Config -Level Info -Message "注入語言包／FoD：$(Split-Path -Path $package -Leaf)"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsPackage -Path $MountPath -PackagePath $package | Out-Null
+            Add-WindowsPackage -Path $MountPath -PackagePath $package -LogLevel $Config.DismLogLevel | Out-Null
         } | Out-Null
     }
 }

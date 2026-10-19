@@ -4,7 +4,7 @@ BeforeAll {
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaUpdate.psm1') -Force
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaLangFod.psm1') -Force
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaIndexInfo.psm1') -Force
-    $script:config = @{ LogLevel = 'Info'; OperationLog = ''; DebugTrace = 0; LogFile = (Join-Path -Path $TestDrive -ChildPath 'cumulative.log'); PackageDir = (Join-Path -Path $TestDrive -ChildPath 'pkg'); DismProvider = 'Inbox'; Download = @{ Method = 'WebRequest' } }
+    $script:config = @{ LogLevel = 'Info'; OperationLog = ''; DebugTrace = 0; LogFile = (Join-Path -Path $TestDrive -ChildPath 'cumulative.log'); PackageDir = (Join-Path -Path $TestDrive -ChildPath 'pkg'); DismProvider = 'Inbox'; DismLogLevel = 'WarningsInfo'; Download = @{ Method = 'WebRequest' } }
 
     # Learn 發行資訊頁的一列（24H2 通道、最新 build 26100.9711、KB 連結 help/5127648）
     $script:learnHtml = @"
