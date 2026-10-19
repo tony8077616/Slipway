@@ -27,7 +27,26 @@ Describe 'DismLogLevel 設定與參數' -Tag 'Unit' {
         $bad = $script:default.Clone()
         $bad.DismLogLevel = '3'
         $bad.WorkDir = 'C:\WinMediaWorkLogLevelTest'
-        { Invoke-WindowsMediaRefresh -SourceIso 'D:\x.iso' -Config $bad -Confirm:$false } | Should -Throw '*DismLogLevel*'
+        { Invoke-WindowsMediaRefresh -SourceIso 'D:\x.iso' -Config $bad -Confirm:$false } | Should -Throw '*DismLogLevel 必須為*'
+    }
+}
+
+Describe 'Resolve-WinMediaDismLogLevel（預設與驗證集中於 Keel）' -Tag 'Unit' {
+    BeforeAll {
+        Import-Module -Name (Join-Path -Path $script:root -ChildPath 'PSModules\Imaging\WinMediaDism.psm1') -Force
+    }
+
+    It '缺鍵時回傳 WarningsInfo' {
+        Resolve-WinMediaDismLogLevel -Config @{} | Should -Be 'WarningsInfo'
+    }
+
+    It '合法名稱原樣回傳' {
+        Resolve-WinMediaDismLogLevel -Config @{ DismLogLevel = 'Debug' } | Should -Be 'Debug'
+    }
+
+    It '數字與不在清單內的名稱拋出 DismLogLevel 錯誤' {
+        { Resolve-WinMediaDismLogLevel -Config @{ DismLogLevel = '3' } } | Should -Throw '*DismLogLevel 必須為*'
+        { Resolve-WinMediaDismLogLevel -Config @{ DismLogLevel = 'Verbose' } } | Should -Throw '*DismLogLevel 必須為*'
     }
 }
 
@@ -48,27 +67,67 @@ Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
         Should -Invoke -ModuleName WinMediaLangFod Add-WindowsPackage -Times 3 -Exactly -ParameterFilter { $LogLevel -eq 'Debug' }
     }
 
-    # 全模組掃描：不手列 cmdlet，改由 Dism 模組取得完整清單，任何非測試檔的 DISM 呼叫缺 -LogLevel 即失敗
-    It '所有非測試模組的 DISM cmdlet 呼叫都含 -LogLevel $Config.DismLogLevel' {
+    # AST 掃描：以 Dism 模組的完整 cmdlet 清單比對 CommandAst，不靠字串或行首位置；
+    # 字串、註解、跨行續接與行中呼叫都能正確處理。參數值必須是 $Config.DismLogLevel。
+    It '所有非測試模組的 DISM cmdlet 呼叫都以 -LogLevel $Config.DismLogLevel 傳入（AST）' {
+        if (-not (Get-Module -ListAvailable -Name DISM)) {
+            Set-ItResult -Skipped -Because 'DISM 模組不存在於此環境'
+            return
+        }
         Import-Module -Name DISM -ErrorAction Stop
-        $names = (Get-Command -Module DISM).Name -join '|'
-        $files = Get-ChildItem -LiteralPath @((Join-Path -Path $script:root -ChildPath 'Public'), (Join-Path -Path $script:root -ChildPath 'Modules'), (Join-Path -Path $script:root -ChildPath 'PSModules')) -Recurse -Include '*.ps1', '*.psm1' |
-            Where-Object { $_.FullName -notmatch '\\Tests\\' }
+        $names = @((Get-Command -Module DISM).Name)
+        $files = Get-ChildItem -LiteralPath @((Join-Path -Path $script:root -ChildPath 'Public'), (Join-Path -Path $script:root -ChildPath 'Modules'), (Join-Path -Path $script:root -ChildPath 'PSModules')) -Recurse -File |
+            Where-Object { $_.Extension -in '.ps1', '.psm1' -and $_.FullName -notmatch '\\Tests\\' }
         $missing = @()
         foreach ($file in $files) {
-            $n = 0
-            foreach ($line in (Get-Content -LiteralPath $file.FullName)) {
-                $n++
-                if ($line -match "^\s*($names)\b" -and $line -notmatch '-LogLevel \$Config\.DismLogLevel') { $missing += ('{0}:{1}' -f $file.Name, $n) }
+            $tokens = $null
+            $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            $errors | Should -BeNullOrEmpty
+            $calls = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true)
+            foreach ($call in $calls) {
+                $name = $call.GetCommandName()
+                if (-not $name -or $names -notcontains $name) { continue }
+                $elements = @($call.CommandElements)
+                $index = [array]::FindIndex($elements, [System.Predicate[object]] { param($e) $e -is [System.Management.Automation.Language.CommandParameterAst] -and $e.ParameterName -eq 'LogLevel' })
+                # -LogLevel $x 拆成兩個元素：值在參數後面的元素（或參數本身的 Argument，語法 -LogLevel:$x）
+                $value = if ($index -lt 0) { $null } elseif ($elements[$index].Argument) { $elements[$index].Argument } elseif ($index + 1 -lt $elements.Count) { $elements[$index + 1] } else { $null }
+                $ok = $value -and $value.Extent.Text -eq '$Config.DismLogLevel'
+                if (-not $ok) { $missing += ('{0}:{1} {2}' -f $file.Name, $call.Extent.StartLineNumber, $name) }
             }
         }
         $missing | Should -BeNullOrEmpty
     }
+}
 
-    # 舊設定檔相容：缺 DismLogLevel 時主流程以 WarningsInfo 補上（靜態檢查，主流程需要真實映像無法直接執行）
-    It '主流程在 DismLogLevel 缺鍵時以 WarningsInfo 補上預設值' {
-        $main = Get-Content -LiteralPath (Join-Path -Path $script:root -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1') -Raw
-        $main | Should -Match "if \(-not \`$Config\.ContainsKey\('DismLogLevel'\)\) \{ \`$Config\.DismLogLevel = 'WarningsInfo' \}"
-        $main.IndexOf("ContainsKey('DismLogLevel')") | Should -BeLessThan $main.IndexOf("-notcontains `$Config.DismLogLevel")
+Describe 'DismLogLevel 缺鍵的舊設定檔（相容性）' -Tag 'Unit' {
+    It 'Mount-WinMediaImage 缺鍵時由 wrapper 補上 WarningsInfo 再傳給 Mount／Dismount' {
+        $noKey = $script:cfg.Clone()
+        [void]$noKey.Remove('DismLogLevel')
+        Mock -ModuleName WinMediaImage Mount-WindowsImage { } -ParameterFilter { $LogLevel -eq 'WarningsInfo' }
+        Mock -ModuleName WinMediaImage Dismount-WindowsImage { } -ParameterFilter { $LogLevel -eq 'WarningsInfo' }
+        Mount-WinMediaImage -ImagePath 'x.wim' -Index 1 -MountPath (Join-Path -Path $TestDrive -ChildPath 'mp2') -Action { 'ok' } -Config $noKey | Out-Null
+        Should -Invoke -ModuleName WinMediaImage Mount-WindowsImage -Times 1 -Exactly -ParameterFilter { $LogLevel -eq 'WarningsInfo' }
+        Should -Invoke -ModuleName WinMediaImage Dismount-WindowsImage -Times 1 -Exactly -ParameterFilter { $LogLevel -eq 'WarningsInfo' }
+    }
+
+    It '主流程缺鍵時通過 DismLogLevel 檢查，在解析掛載目錄時才停下（不解析磁碟根目錄的 MountUUP）' {
+        Mock -ModuleName WinMediaRefresh Resolve-WinMediaMountDir { throw 'REACHED_MOUNTDIR' }
+        $noKey = $script:default.Clone()
+        [void]$noKey.Remove('DismLogLevel')
+        { Invoke-WindowsMediaRefresh -SourceIso 'C:\__none.iso' -Config $noKey -WorkDir $TestDrive -Confirm:$false } | Should -Throw '*REACHED_MOUNTDIR*'
+    }
+
+    It '主流程的 -DismLogLevel 參數可覆寫缺鍵的設定' {
+        Mock -ModuleName WinMediaRefresh Resolve-WinMediaMountDir { throw 'REACHED_MOUNTDIR' }
+        $noKey = $script:default.Clone()
+        [void]$noKey.Remove('DismLogLevel')
+        { Invoke-WindowsMediaRefresh -SourceIso 'C:\__none.iso' -Config $noKey -WorkDir $TestDrive -DismLogLevel Debug -Confirm:$false } | Should -Throw '*REACHED_MOUNTDIR*'
+    }
+
+    It '主流程的 DismLogLevel 為 Verbose 時在掛載前中止' {
+        $bad = $script:default.Clone()
+        $bad.DismLogLevel = 'Verbose'
+        { Invoke-WindowsMediaRefresh -SourceIso 'C:\__none.iso' -Config $bad -WorkDir $TestDrive -Confirm:$false } | Should -Throw '*DismLogLevel 必須為*'
     }
 }

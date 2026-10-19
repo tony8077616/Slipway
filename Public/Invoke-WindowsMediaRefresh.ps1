@@ -32,6 +32,7 @@
         [string]$WorkDir,
         [string]$MountDir,
         [string]$OutputDir,
+        # 參數端先擋掉非法值（給出 PowerShell 的參數錯誤）；合法名單與預設值的權威定義在 Resolve-WinMediaDismLogLevel
         [ValidateSet('Errors', 'Warnings', 'WarningsInfo', 'Debug')][string]$DismLogLevel
     )
 
@@ -71,12 +72,9 @@
     }
     if ($MountDir) { $Config.MountDir = $MountDir }
     if ($OutputDir) { $Config.OutputDir = $OutputDir }
-    # 舊設定檔可能沒有 DismLogLevel：缺鍵時用預設值，避免 StrictMode 下讀取缺少的鍵直接拋錯
-    if (-not $Config.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = 'WarningsInfo' }
     if ($PSBoundParameters.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = $DismLogLevel }
-    if ('Errors', 'Warnings', 'WarningsInfo', 'Debug' -notcontains $Config.DismLogLevel) {
-        throw "DismLogLevel 必須為 Errors／Warnings／WarningsInfo／Debug 其中之一（名稱，不是數字），目前為：'$($Config.DismLogLevel)'。"
-    }
+    # 舊設定檔缺 DismLogLevel 時補預設並驗證（規則集中在 Keel 的 Resolve-WinMediaDismLogLevel）
+    $Config.DismLogLevel = Resolve-WinMediaDismLogLevel -Config $Config
     $Config.MountDir = Resolve-WinMediaMountDir -WorkDir $Config.WorkDir -MountDir $Config.MountDir
     # 空白 = 工具所在磁碟根目錄\WinMediaOut（與 WorkDir 並列，不在 OneDrive 內，不受第 12 步清理影響）
     if ([string]::IsNullOrWhiteSpace($Config.OutputDir)) {
