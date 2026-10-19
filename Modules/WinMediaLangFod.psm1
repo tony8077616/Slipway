@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 # 語言包與 FoD 獨立資料夾（§2.3）：依 Config.Languages 篩選，於 LCU 之後注入 install.wim
-# 需要的 Config 鍵：Lang.Path、Fod.Path、Languages、DismProvider、LogLevel／LogFile、DebugTrace、OperationLog
+# 需要的 Config 鍵：Lang.Path、Fod.Path、Languages、DismProvider、DismLogLevel、LogLevel／LogFile、DebugTrace、OperationLog
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaLog.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Imaging\WinMediaDism.psm1') -Force
 

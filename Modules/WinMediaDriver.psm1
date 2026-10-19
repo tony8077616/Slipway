@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 # 自訂驅動模組（§3.1）：依 ALL／WinPE／OS 子資料夾分類，並注入 WinRE、Install、Boot 映像
-# 需要的 Config 鍵：Drivers.ForceUnsigned、DismProvider、DebugTrace、LogLevel／LogFile、OperationLog
+# 需要的 Config 鍵：Drivers.ForceUnsigned、DismProvider、DismLogLevel、DebugTrace、LogLevel／LogFile、OperationLog
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaLog.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Imaging\WinMediaDism.psm1') -Force
 

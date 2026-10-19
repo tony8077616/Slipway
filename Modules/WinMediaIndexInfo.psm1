@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 
 # install.wim 索引資訊：Get-WindowsImage 不帶 -Index 只回傳 BasicImageInfoObject（沒有 Build／EditionId／Architecture），必須逐索引再查
 # 模組名稱刻意與 PSModules\Imaging\WinMediaImage.psm1（Mount-WinMediaImage）不同，避免 Import-Module 互相覆寫
-# 需要的 Config 鍵：DismProvider、DebugTrace、OperationLog、LogLevel／LogFile
+# 需要的 Config 鍵：DismProvider、DismLogLevel、DebugTrace、OperationLog、LogLevel／LogFile
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Imaging\WinMediaDism.psm1') -Force
 
 function Get-WinMediaIndexInfo {

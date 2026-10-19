@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 # StoreApps 獨立資料夾（例如 rg-adguard 下載的 Appx／MSIX）：注入前逐一驗證 Microsoft 簽章
-# 需要的 Config 鍵：StoreApps.Path、DismProvider、LogLevel／LogFile、DebugTrace、OperationLog
+# 需要的 Config 鍵：StoreApps.Path、DismProvider、DismLogLevel、LogLevel／LogFile、DebugTrace、OperationLog
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaLog.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Imaging\WinMediaDism.psm1') -Force
 

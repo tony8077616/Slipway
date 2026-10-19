@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 # 語言體驗套件（LXP）模組（§3.2）：遞迴偵測、從套件讀出 PFN 與 License.xml、加入 install.wim
-# 需要的 Config 鍵：DismProvider、LogLevel／LogFile、DebugTrace、OperationLog
+# 需要的 Config 鍵：DismProvider、DismLogLevel、LogLevel／LogFile、DebugTrace、OperationLog
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaLog.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaOperation.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Imaging\WinMediaDism.psm1') -Force

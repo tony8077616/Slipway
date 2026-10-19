@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaOperation.psm1') -Force
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaProcess.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Imaging\WinMediaWimlib.psm1') -Force
 
 function Copy-WinMediaBootFile {
@@ -211,11 +212,24 @@ function Copy-WinMediaBootWimSources {
     $pairs.Add([pscustomobject]@{ Source = (Join-Path -Path $MediaDir -ChildPath 'setup.exe'); Dest = '\setup.exe' })
     $pairs.Add([pscustomobject]@{ Source = (Join-Path -Path $mediaSources -ChildPath 'inf\setup.cfg'); Dest = '\sources\inf\setup.cfg' })
 
-    $lines = @($pairs | Where-Object { Test-Path -LiteralPath $_.Source -PathType Leaf } | ForEach-Object {
+    Invoke-WinMediaBootWimAdd -WimPath $WimPath -Index $Index -Pairs $pairs.ToArray() -Config $Config
+}
+
+function Invoke-WinMediaBootWimAdd {
+    # 對應 convert-UUP boot-wim.txt 的 add 行：來源不存在者略過；wimlib 的 update 只接受標準輸入的指令，寫入暫存檔後經 stdin 傳入
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WimPath,
+        [Parameter(Mandatory)][int]$Index,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Pairs,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    $lines = @($Pairs | Where-Object { Test-Path -LiteralPath $_.Source -PathType Leaf } | ForEach-Object {
             "add '{0}' '{1}'" -f $_.Source, $_.Dest
         })
     if ($lines.Count -eq 0) { return }
-    # wimlib 的 update 只接受標準輸入的指令（--command 只能給一次，實機已確認），寫入暫存檔後經 stdin 傳入
+    # --command 只能給一次（實機已確認），因此寫入暫存檔後經 stdin 傳入
     $commandFile = [System.IO.Path]::GetTempFileName()
     try {
         # shortcut: 指令檔以 ASCII 寫入，路徑含非 ASCII 字元（例如 WorkDir 位於中文目錄）時 wimlib 會找不到檔案並明確報錯；需要時改為無 BOM 的 UTF-8 並確認 wimlib 的 stdin 編碼
@@ -288,4 +302,134 @@ function Remove-WinMediaExtraLanguage {
     }
 }
 
-Export-ModuleMember -Function Copy-WinMediaUpdatedBootFiles, Compress-WinMediaBootWim, Copy-WinMediaSetupDuFiles, Copy-WinMediaBootWimSources, Get-WinMediaEffectiveLanguage, Remove-WinMediaExtraLanguage
+function Get-WinMediaBootBackground {
+    # convert-UUP set_bkimg（1171–1176 行）：依序取第一個存在於 sources\ 的背景圖；沒有則回傳 $null
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$SourcesDir)
+
+    foreach ($name in 'background_cli.bmp', 'background_svr.bmp', 'background_cli.png', 'background_svr.png', 'winpe.jpg') {
+        if (Test-Path -LiteralPath (Join-Path -Path $SourcesDir -ChildPath $name) -PathType Leaf) { return $name }
+    }
+    return $null
+}
+
+function Get-WinMediaBootSoftwareCommand {
+    # convert-UUP 1104–1116、1151–1154 行的 WinPE 登錄值；$Hive 為已載入的根鍵。每列為 @(動作, 鍵, 值名稱, 型別, 資料)，刪除列只有前三項
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet(1, 2)][int]$Index,
+        [Parameter(Mandatory)][string]$Hive
+    )
+
+    $version = "$Hive\Microsoft\Windows NT\CurrentVersion"
+    $winpe = "$version\WinPE"
+    $rows = New-Object System.Collections.Generic.List[object]
+    if ($Index -eq 1) {
+        $rows.Add(@('add', $version, 'SystemRoot', 'REG_SZ', 'X:\$windows.~bt\Windows'))
+        $rows.Add(@('add', $winpe, 'InstRoot', 'REG_SZ', 'X:\$windows.~bt\'))
+        $rows.Add(@('add', $winpe, 'CustomBackground', 'REG_EXPAND_SZ', '%SystemRoot%\System32\winre.jpg'))
+    }
+    else {
+        $rows.Add(@('add', $winpe, 'CustomBackground', 'REG_EXPAND_SZ', '%SystemRoot%\System32\setup.bmp'))
+    }
+    $rows.Add(@('delete', $winpe, 'CustomShell'))
+    return $rows.ToArray()
+}
+
+function Set-WinMediaBootSoftware {
+    # 從 WinPE 索引取出 SOFTWARE，以 reg.exe 載入暫存根鍵後套用 Get-WinMediaBootSoftwareCommand，卸載後回傳暫存 hive 路徑（convert-UUP 以 offlinereg 處理同一組值）
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = '只寫入掛載中映像或本次工作目錄的暫存檔與暫存登錄根鍵，不變更系統狀態；寫入動作由 Invoke-WinMediaOperation 或 Invoke-WinMediaWimlib 負責記錄')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WimPath,
+        [Parameter(Mandatory)][ValidateSet(1, 2)][int]$Index,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    $dir = Join-Path -Path $Config.WorkDir -ChildPath ('boot-software-{0}' -f $Index)
+    if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    Invoke-WinMediaWimlib -ArgumentList @('extract', $WimPath, [string]$Index, '\Windows\System32\config\SOFTWARE', ('--dest-dir={0}' -f $dir), '--no-acls', '--no-attributes') -Config $Config | Out-Null
+    $hive = Join-Path -Path $dir -ChildPath 'SOFTWARE'
+    $root = 'HKLM\WinMediaBootSW'
+    $load = Invoke-WinMediaExternal -FilePath 'reg.exe' -ArgumentList @('load', $root, $hive) -Config $Config
+    if ($load.ExitCode -ne 0) { throw "載入 SOFTWARE 失敗：$($load.StdErr)" }
+    try {
+        foreach ($row in Get-WinMediaBootSoftwareCommand -Index $Index -Hive $root) {
+            if ($row[0] -eq 'add') {
+                $result = Invoke-WinMediaExternal -FilePath 'reg.exe' -ArgumentList @('add', $row[1], '/v', $row[2], '/t', $row[3], '/d', $row[4], '/f') -Config $Config
+                if ($result.ExitCode -ne 0) { throw "寫入 $($row[2]) 失敗：$($result.StdErr)" }
+            }
+            else {
+                # 值不存在時 reg delete 會失敗；convert-UUP 同樣忽略
+                Invoke-WinMediaExternal -FilePath 'reg.exe' -ArgumentList @('delete', $row[1], '/v', $row[2], '/f') -Config $Config | Out-Null
+            }
+        }
+    }
+    finally {
+        Invoke-WinMediaExternal -FilePath 'reg.exe' -ArgumentList @('unload', $root) -Config $Config | Out-Null
+    }
+    return $hive
+}
+
+function New-WinMediaBootWimFromWinRE {
+    # 以 WinRE 重建 boot.wim（convert-UUP BakISO 742–745 行、1104–1160 行）
+    # 索引 1 = WinRE，名稱 PE、FLAGS=9；索引 2 = 索引 1 以 --boot 匯出，名稱 Setup、FLAGS=2。兩索引各自刪除 winpeshl.ini、寫入 SOFTWARE 與背景圖
+    # SSU／LCU／驅動與 boot-wim.txt 清單不在此處理，分別由呼叫端的步驟 9 與其後的同步處理（LCU 之後才寫入，避免被覆蓋）
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = '只寫入掛載中映像或本次工作目錄的暫存檔與暫存登錄根鍵，不變更系統狀態；寫入動作由 Invoke-WinMediaOperation 或 Invoke-WinMediaWimlib 負責記錄')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WinreWim,
+        [Parameter(Mandatory)][string]$BootWim,
+        [Parameter(Mandatory)][string]$MediaDir,
+        [Parameter(Mandatory)][string]$ArchName,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    $sourcesDir = Join-Path -Path $MediaDir -ChildPath 'sources'
+    $bkName = Get-WinMediaBootBackground -SourcesDir $sourcesDir
+    $bk = if ($bkName) { Join-Path -Path $sourcesDir -ChildPath $bkName } else { $null }
+    $peName = 'Microsoft Windows PE ({0})' -f $ArchName
+    $setupName = 'Microsoft Windows Setup ({0})' -f $ArchName
+
+    Invoke-WinMediaOperation -Category File -Operation 'BootWimFromWinRE' -Target $BootWim -Config $Config -ScriptBlock {
+        Copy-Item -LiteralPath $WinreWim -Destination $BootWim -Force
+    } | Out-Null
+    Invoke-WinMediaWimlib -ArgumentList @('info', $BootWim, '1', $peName, $peName, '--image-property', 'FLAGS=9') -Config $Config | Out-Null
+    # WinRE 內含 winpeshl.ini，留著會開機進入復原殼層而非 Setup（convert-UUP 742–745 與 1121–1123 行皆刪除）
+    Invoke-WinMediaWimlib -ArgumentList @('update', $BootWim, '1', "--command=delete '\Windows\system32\winpeshl.ini'") -Config $Config | Out-Null
+
+    $software1 = Set-WinMediaBootSoftware -WimPath $BootWim -Index 1 -Config $Config
+    $index1Pairs = @([pscustomobject]@{ Source = $software1; Dest = '\Windows\System32\config\SOFTWARE' })
+    if ($bk -and -not (Test-Path -LiteralPath (Join-Path -Path $sourcesDir -ChildPath 'winre.jpg'))) {
+        $index1Pairs += [pscustomobject]@{ Source = $bk; Dest = '\Windows\system32\winre.jpg' }
+    }
+    Invoke-WinMediaBootWimAdd -WimPath $BootWim -Index 1 -Pairs $index1Pairs -Config $Config
+
+    Invoke-WinMediaWimlib -ArgumentList @('export', $WinreWim, '1', $BootWim, $setupName, $setupName, '--boot') -Config $Config | Out-Null
+    Invoke-WinMediaWimlib -ArgumentList @('info', $BootWim, '2', '--image-property', 'FLAGS=2') -Config $Config | Out-Null
+    Invoke-WinMediaWimlib -ArgumentList @('update', $BootWim, '2', "--command=delete '\Windows\system32\winpeshl.ini'") -Config $Config | Out-Null
+
+    $software2 = Set-WinMediaBootSoftware -WimPath $BootWim -Index 2 -Config $Config
+    $index2Pairs = New-Object System.Collections.Generic.List[object]
+    $index2Pairs.Add([pscustomobject]@{ Source = $software2; Dest = '\Windows\System32\config\SOFTWARE' })
+    if ($bk) {
+        $index2Pairs.Add([pscustomobject]@{ Source = $bk; Dest = '\sources\background.bmp' })
+        $index2Pairs.Add([pscustomobject]@{ Source = $bk; Dest = '\Windows\system32\setup.bmp' })
+        if (-not (Test-Path -LiteralPath (Join-Path -Path $sourcesDir -ChildPath 'winpe.jpg'))) { $index2Pairs.Add([pscustomobject]@{ Source = $bk; Dest = '\Windows\system32\winpe.jpg' }) }
+        if (-not (Test-Path -LiteralPath (Join-Path -Path $sourcesDir -ChildPath 'winre.jpg'))) { $index2Pairs.Add([pscustomobject]@{ Source = $bk; Dest = '\Windows\system32\winre.jpg' }) }
+    }
+    Invoke-WinMediaBootWimAdd -WimPath $BootWim -Index 2 -Pairs $index2Pairs.ToArray() -Config $Config
+
+    # convert-UUP 於索引 2 匯出之後才對索引 1 加入 winpe.jpg（1160 行附近）
+    if ($bk) {
+        Invoke-WinMediaBootWimAdd -WimPath $BootWim -Index 1 -Pairs @([pscustomobject]@{ Source = $bk; Dest = '\Windows\system32\winpe.jpg' }) -Config $Config
+    }
+
+    # SOFTWARE 暫存目錄（含 reg 的 LOG 檔）在此清除；WorkDir 不在第 12 步的清理清單內
+    foreach ($i in 1, 2) {
+        Remove-Item -LiteralPath (Join-Path -Path $Config.WorkDir -ChildPath ('boot-software-{0}' -f $i)) -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Export-ModuleMember -Function Copy-WinMediaUpdatedBootFiles, Compress-WinMediaBootWim, Copy-WinMediaSetupDuFiles, Copy-WinMediaBootWimSources, Get-WinMediaEffectiveLanguage, Remove-WinMediaExtraLanguage, Invoke-WinMediaBootWimAdd, Get-WinMediaBootBackground, Get-WinMediaBootSoftwareCommand, Set-WinMediaBootSoftware, New-WinMediaBootWimFromWinRE

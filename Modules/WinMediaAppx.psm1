@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 # CustomAppsList 與 provisioned Appx 移除模組（§3.3）
-# 需要的 Config 鍵：DismProvider、LogLevel／LogFile、DebugTrace、OperationLog
+# 需要的 Config 鍵：DismProvider、DismLogLevel、LogLevel／LogFile、DebugTrace、OperationLog
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaLog.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Imaging\WinMediaDism.psm1') -Force
 

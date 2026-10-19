@@ -48,18 +48,6 @@ Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
         Should -Invoke -ModuleName WinMediaLangFod Add-WindowsPackage -Times 3 -Exactly -ParameterFilter { $LogLevel -eq 'Debug' }
     }
 
-    # 主流程需要真實映像，改為靜態檢查：每個 DISM cmdlet 呼叫行都含 -LogLevel
-    It '<File> 每個 DISM cmdlet 呼叫都含 -LogLevel $Config.DismLogLevel' -ForEach @(
-        @{ File = 'Public\Invoke-WindowsMediaRefresh.ps1'; Expected = 12 }
-        @{ File = 'Modules\WinMediaLangFod.psm1'; Expected = 2 }
-        @{ File = 'PSModules\Imaging\WinMediaImage.psm1'; Expected = 3 }
-    ) {
-        $lines = Get-Content -LiteralPath (Join-Path -Path $script:root -ChildPath $File)
-        $calls = @($lines | Select-String -Pattern '^\s*(Add-WindowsPackage|Repair-WindowsImage|Remove-WindowsImage|Get-WindowsImage|Mount-WindowsImage|Dismount-WindowsImage)\s')
-        $calls.Count | Should -Be $Expected
-        @($calls | Where-Object { $_.Line -match '-LogLevel \$Config\.DismLogLevel' }).Count | Should -Be $Expected
-    }
-
     # 全模組掃描：不手列 cmdlet，改由 Dism 模組取得完整清單，任何非測試檔的 DISM 呼叫缺 -LogLevel 即失敗
     It '所有非測試模組的 DISM cmdlet 呼叫都含 -LogLevel $Config.DismLogLevel' {
         Import-Module -Name DISM -ErrorAction Stop
