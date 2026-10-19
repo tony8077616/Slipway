@@ -76,6 +76,7 @@
 | `AdkRoot` | ADK 預設安裝路徑 | `DismProvider = 'ADK'` 或需要 oscdimg 時使用；缺少時自動安裝 Deployment Tools |
 | `DismProvider` | `Inbox` | `Inbox` 或 `ADK` |
 | `OutputFormat` | `WIM` | `WIM` 或 `ESD` |
+| `WinPEUpdate` | `SafeOS` | WinPE 核心更新路線：`SafeOS`（套用 SafeOS DU，已驗證）或 `Lcu`（convert-UUP 路線：WinRE 套 SSU＋SafeOS DU，boot.wim 再套最新 LCU；尚未 e2e 驗證） |
 | `UpdateBootFiles` | `$true` | 選項 B：改用安裝映像內已套用 LCU 的 `_EX` 開機檔（bootx64、bootmgr、efisys、memtest、boot.stl、fonts、cipolicies）。**風險**：這些是 UEFI CA 2023 開機檔，韌體 db 沒有 2023 CA 的機器開啟 Secure Boot 可能無法開機 |
 | `ResetBase` | `$false` | 啟用後無法解除安裝更新 |
 | `Drivers.Path` | 空白 | 驅動資料夾（含 `ALL`、`WinPE`、`OS` 子資料夾）；空白 = 執行腳本所在目錄\`Drivers`（不存在則停用） |

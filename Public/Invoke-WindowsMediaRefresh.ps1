@@ -43,11 +43,11 @@
         '3 偵測 build 與索引',
         '4 下載更新包（僅於設定 Download.Build 或 Download.KB 時）；分類 PackageDir（缺 SSU 或 LCU 即中止；目標與 checkpoint 經 WorkDir\update-stage 注入）',
         '4a 虛擬版本條件（§2.7.1、§2.7.7）',
-        '5 WinRE：取索引 1 的 winre.wim → SSU → SafeOS DU（若有）→ cleanup（不套 LCU，§11.8 2a）→ 驅動（若設定，WinRE 目標）',
+        '5 WinRE：取索引 1 的 winre.wim → SSU → SafeOS DU（有則套用）→ cleanup（不套 LCU，§11.8 2a）→ 驅動（若設定，WinRE 目標）',
         '6 install.wim 各索引：SSU → 語言包與 FoD → 最新 LCU（含 checkpoint）→ cleanup（CBS 待處理只警告）→ NetFx3 → .NET CU → 移除 Appx（若設定）→ 加入 LXP → 驅動 → 放入 WinRE → 選項 UpdateBootFiles（預設開）時取用已套用 LCU 映像的 _EX 開機檔',
         '7 虛擬版本（僅來源為 EnterpriseS 且在 Indexes 目標內；§2.7.4）',
         '8 展開 Setup DU 到 sources（第 26 列）',
-        '9 boot.wim 索引 1、2：SSU → 最新 LCU（含 checkpoint）→ cleanup → 驅動（若設定，Boot 目標）；索引 2 內 boot manager 覆蓋媒體（第 28 列；選項 UpdateBootFiles 已套用 _EX 開機檔時跳過）；兩個索引卸載後，以 wimlib update 把媒體 sources\ 覆蓋 WinPE 索引 2 的同名檔（convert-UUP bootwim.txt／bootmui.txt，方向與 MS 文件第 27 列相反）；最後 boot.wim 做 export（保留可開機索引）與 optimize',
+        '9 boot.wim 索引 1、2：WinPEUpdate 為 Lcu 時套用最新 LCU（含 checkpoint；SafeOS 路線跳過）→ cleanup → 驅動（若設定，Boot 目標）；索引 2 內 boot manager 覆蓋媒體（第 28 列；選項 UpdateBootFiles 已套用 _EX 開機檔時跳過）；兩個索引卸載後，以 wimlib update 把媒體 sources\ 覆蓋 WinPE 索引 2 的同名檔（convert-UUP bootwim.txt／bootmui.txt，方向與 MS 文件第 27 列相反）；最後 boot.wim 做 export（保留可開機索引）與 optimize',
         '10 移除來源 EnterpriseS（僅 DeleteSourceEdition 且已建立虛擬版本）後，依 §2.7.5 處理 ei.cfg',
         '11 輸出：oscdimg 雙開機 ISO 或 install.esd（寫入 OutputDir）',
         '12 成功後清除 WorkDir 下的 media、winre、expand；MountDir 若由本次建立則一併清除；logs 保留'
@@ -58,6 +58,8 @@
 
     # 參數覆寫設定檔；LogDir 與 OperationLog 跟隨 WorkDir
     $Config = $Config.Clone()
+    # 自訂設定檔可能沒有此鍵；缺少時採預設路線 SafeOS（驗證不接受 $null）
+    if (-not $Config.ContainsKey('WinPEUpdate')) { $Config.WinPEUpdate = 'SafeOS' }
     # 空白 = 腳本所在磁碟根目錄\WinMediaWork，避免直接放在系統磁碟區根目錄（除非腳本本身位於 C 槽）
     if (-not $WorkDir -and [string]::IsNullOrWhiteSpace($Config.WorkDir)) {
         $WorkDir = Join-Path -Path ([System.IO.Path]::GetPathRoot($PSScriptRoot)) -ChildPath 'WinMediaWork'
@@ -126,6 +128,7 @@
     if (-not [string]::IsNullOrWhiteSpace($Config.Lxp.Path) -and -not (Test-Path -LiteralPath $Config.Lxp.Path -PathType Container)) {
         throw "找不到 LXP 資料夾：$($Config.Lxp.Path)"
     }
+    if ($Config.WinPEUpdate -notin 'SafeOS', 'Lcu') { throw "不支援的 WinPEUpdate：$($Config.WinPEUpdate)" }
     $oscdimg = $null
     switch ($Config.OutputFormat) {
         'WIM' { $oscdimg = Resolve-WinMediaOscdimg -Config $Config }
@@ -381,16 +384,18 @@
             param($mounted)
             # 不單獨加入 SSU：獨立加入的 SSU 會被暫停（pended），其後的 LCU 會被略過、CBS 停留在 9441；LCU 套件本身已含 SSU（實測單獨加入即升至 9711）
             # 直接套用目標 LCU msu（資料夾模式會先處理較舊的 checkpoint msu，實測 KB5043080 回 0x80070228）
-            # shortcut: 目前開機索引的 WinPE 核心版本來自 SafeOS DU（步驟 5），LCU RollupFix 9711.1.30 實測不會寫入開機索引（ntoskrnl 不因此變動）；保留此呼叫待使用者決定 SafeOS 或 LCU 路線（convert-UUP SSU→Commit→LCU）
-            Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target -LogLevel $Config.DismLogLevel | Out-Null
+            # 只有 Lcu 路線在此以原始 MSU 直接加入 LCU；實測 DISM 判定 Not applicable（無效果），SafeOS 路線的核心版本由步驟 5 的 SafeOS DU 提供
+            if ($Config.WinPEUpdate -eq 'Lcu') {
+                Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
+                    Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target -LogLevel $Config.DismLogLevel | Out-Null
+                }
             }
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
                 Repair-WindowsImage -Path $mounted -StartComponentCleanup -LogLevel $Config.DismLogLevel | Out-Null
             }
             # 守衛：開機索引的 ntoskrnl 必須與安裝映像一致（只比核心版本，無法區分 SafeOS DU 與 LCU 是否套用）；不一致時中止
             $bootKernel = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
-            if ($bootKernel -ne $installKernel.Version) { throw "boot.wim 索引 $bootIndex 未套用 LCU：ntoskrnl $bootKernel，安裝映像 $($installKernel.Version)。" }
+            if ($bootKernel -ne $installKernel.Version) { throw "boot.wim 索引 $bootIndex 的 ntoskrnl 版本 $bootKernel 與安裝映像 $($installKernel.Version) 不一致（WinPEUpdate=$($Config.WinPEUpdate)）。" }
             if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Boot' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
             if ($bootIndex -eq 2) {
                 # 第 28 列 boot manager：自 WinPE 覆蓋媒體上的同名檔案，須排在 setup／setuphost 覆蓋之後
