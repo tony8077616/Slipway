@@ -432,4 +432,19 @@ function New-WinMediaBootWimFromWinRE {
     }
 }
 
-Export-ModuleMember -Function Copy-WinMediaUpdatedBootFiles, Compress-WinMediaBootWim, Copy-WinMediaSetupDuFiles, Copy-WinMediaBootWimSources, Get-WinMediaEffectiveLanguage, Remove-WinMediaExtraLanguage, Invoke-WinMediaBootWimAdd, Get-WinMediaBootBackground, Get-WinMediaBootSoftwareCommand, Set-WinMediaBootSoftware, New-WinMediaBootWimFromWinRE
+function Test-WinMediaKernelConsistency {
+    # 步驟 9 守衛：開機索引 ntoskrnl 須等於安裝映像，或等於已套用 SafeOS DU 的 WinRE（Microsoft「用最近版本」規則，不要求與 LCU 同版）；其餘情況中止
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$BootKernel,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$WinreKernel,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$InstallKernel,
+        [Parameter(Mandatory)][bool]$SafeOsApplied,
+        [Parameter(Mandatory)][int]$BootIndex
+    )
+    if ($BootKernel -eq $InstallKernel) { return }
+    if ($SafeOsApplied -and $BootKernel -eq $WinreKernel) { return }
+    throw "boot.wim 索引 $BootIndex 的 ntoskrnl 版本 $BootKernel 不符合規則（WinRE $WinreKernel，安裝映像 $InstallKernel，SafeOS DU 已套用：$SafeOsApplied）。"
+}
+
+Export-ModuleMember -Function Test-WinMediaKernelConsistency, Copy-WinMediaUpdatedBootFiles, Compress-WinMediaBootWim, Copy-WinMediaSetupDuFiles, Copy-WinMediaBootWimSources, Get-WinMediaEffectiveLanguage, Remove-WinMediaExtraLanguage, Invoke-WinMediaBootWimAdd, Get-WinMediaBootBackground, Get-WinMediaBootSoftwareCommand, Set-WinMediaBootSoftware, New-WinMediaBootWimFromWinRE

@@ -282,6 +282,8 @@
         } | Out-Null
     } | Out-Null
 
+    # WinRE 套用 SafeOS DU 後的 ntoskrnl 版本，供步驟 9 守衛判斷開機索引是否取自已更新的 WinRE
+    $winreKernel = @{ Version = $null }
     Mount-WinMediaImage -ImagePath $winreWim -Index 1 -MountPath (Join-Path -Path $mountDir -ChildPath 'winre') -Config $Config -Action {
         param($mounted)
         Write-WinMediaLog -Config $Config -Level Verbose -Message "WinRE 掛載點：$mounted"
@@ -296,6 +298,7 @@
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
             Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:([bool]$Config.ResetBase) -LogLevel $Config.DismLogLevel | Out-Null
         }
+        $winreKernel.Version = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
         if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'WinRE' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
     } | Out-Null
 
@@ -393,9 +396,8 @@
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
                 Repair-WindowsImage -Path $mounted -StartComponentCleanup -LogLevel $Config.DismLogLevel | Out-Null
             }
-            # 守衛：開機索引的 ntoskrnl 必須與安裝映像一致（只比核心版本，無法區分 SafeOS DU 與 LCU 是否套用）；不一致時中止
             $bootKernel = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
-            if ($bootKernel -ne $installKernel.Version) { throw "boot.wim 索引 $bootIndex 的 ntoskrnl 版本 $bootKernel 與安裝映像 $($installKernel.Version) 不一致（WinPEUpdate=$($Config.WinPEUpdate)）。" }
+            Test-WinMediaKernelConsistency -BootKernel $bootKernel -WinreKernel $winreKernel.Version -InstallKernel $installKernel.Version -SafeOsApplied ([bool]$safeOs) -BootIndex $bootIndex
             if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Boot' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
             if ($bootIndex -eq 2) {
                 # 第 28 列 boot manager：自 WinPE 覆蓋媒體上的同名檔案，須排在 setup／setuphost 覆蓋之後
