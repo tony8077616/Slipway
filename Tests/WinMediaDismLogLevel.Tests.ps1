@@ -51,7 +51,23 @@ Describe 'Resolve-WinMediaDismLogLevel（預設與驗證集中於 Keel）' -Tag 
 }
 
 Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
+    BeforeAll {
+        # pwsh 7 會自動載入原生 Dism（Get-Command 找得到），Mock 在模組範圍內無法綁定；改用同簽章樁函式，只在 pwsh 7 測試期間存在
+        $script:stubbed = ($PSVersionTable.PSEdition -eq 'Core')
+        if ($script:stubbed) {
+            function global:Mount-WindowsImage { param($ImagePath, $Index, $Path, [switch]$ReadOnly, $LogLevel) }
+            function global:Dismount-WindowsImage { param($Path, [switch]$Save, [switch]$Discard, $LogLevel) }
+        }
+    }
+    AfterAll {
+        if ($script:stubbed) {
+            Remove-Item -Path Function:\Mount-WindowsImage, Function:\Dismount-WindowsImage -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'Mount-WinMediaImage 傳遞 -LogLevel 給 Mount／Dismount' {
+        # 此測試只驗證 -LogLevel 傳到 Mount／Dismount；先標記為已相容匯入，避免 pwsh 7 下分派真的匯入 DISM
+        InModuleScope WinMediaDism { $script:DismCompatSource = 'DISM' }
         Mock -ModuleName WinMediaImage Mount-WindowsImage { } -ParameterFilter { $LogLevel -eq 'Debug' }
         Mock -ModuleName WinMediaImage Dismount-WindowsImage { } -ParameterFilter { $LogLevel -eq 'Debug' }
         Mount-WinMediaImage -ImagePath 'x.wim' -Index 1 -MountPath (Join-Path -Path $TestDrive -ChildPath 'mp') -Action { 'ok' } -Config $script:cfg | Out-Null

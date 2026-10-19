@@ -18,6 +18,7 @@
     DeleteSourceEdition  = $false                # 建立虛擬版本後是否刪除 EnterpriseS，見 §2.7.6
     LogLevel             = 'Info'
     DismLogLevel         = 'WarningsInfo'        # DISM cmdlet 的 -LogLevel：Errors / Warnings / WarningsInfo / Debug（名稱，不是數字）；測試時用 Debug
+    DismUseWindowsPowerShell = $true             # 在 pwsh 7 執行時，Inbox 與 ADK 皆適用：先檢查，沒有就以 Import-Module -UseWindowsPowerShell 相容模式匯入（ADK 以 Dism.psd1 路徑）；$false = 開工前中止並提示改用 Windows PowerShell 5.1；Windows PowerShell 5.1 忽略此項
     DebugTrace           = 0                     # 0/1/2/3，見 §4
     Drivers = @{
         Path          = ''          # 含 ALL／WinPE／OS 子資料夾的獨立資料夾；空白 = 執行腳本所在目錄\Drivers（不存在則停用）；ALL＝WinRE＋Install＋Boot，WinPE＝WinRE＋Boot，OS＝Install

@@ -77,6 +77,8 @@
     if ($PSBoundParameters.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = $DismLogLevel }
     # 舊設定檔缺 DismLogLevel 時補預設並驗證（規則集中在 Keel 的 Resolve-WinMediaDismLogLevel）
     $Config.DismLogLevel = Resolve-WinMediaDismLogLevel -Config $Config
+    # pwsh 7 下的 DISM 主機檢查（DismUseWindowsPowerShell 為關閉時中止）；開啟時於第一次 DISM 呼叫前先檢查、沒有才匯入
+    Test-WinMediaDismHost -Provider $Config.DismProvider -Config $Config
     $Config.MountDir = Resolve-WinMediaMountDir -WorkDir $Config.WorkDir -MountDir $Config.MountDir
     # 空白 = 工具所在磁碟根目錄\WinMediaOut（與 WorkDir 並列，不在 OneDrive 內，不受第 12 步清理影響）
     if ([string]::IsNullOrWhiteSpace($Config.OutputDir)) {
