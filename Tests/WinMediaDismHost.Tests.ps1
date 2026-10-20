@@ -128,4 +128,11 @@ Describe 'Import-WinMediaDismCompat：匯入參數（僅 pwsh 7）' -Tag 'Unit' 
             $Name -eq $script:adkModule -and $UseWindowsPowerShell
         }
     }
+
+    It '相容匯入的警告不以警告串流顯示，改記為 Info 日誌' {
+        Mock -ModuleName WinMediaDism Import-Module { Write-Warning '測試警告' }
+        Mock -ModuleName WinMediaDism Write-WinMediaLog { }
+        InModuleScope WinMediaDism -Parameters @{ C = $script:cfg } { Import-WinMediaDismCompat -Config $C -Source 'DISM' }
+        Should -Invoke -ModuleName WinMediaDism Write-WinMediaLog -ParameterFilter { $Level -eq 'Info' -and $Message -like '*已知*測試警告*' }
+    }
 }
