@@ -3,7 +3,7 @@
 Import-Module -Name (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'WinMediaRefresh.psd1') -Force
 
 Describe 'Get-WinMediaWimlibSpec（wimlib 1.14.5 發行包）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaWimlib {
         It 'AMD64 對應 x86_64 發行包與論壇公告 SHA-256' {
             $spec = Get-WinMediaWimlibSpec -Architecture 'AMD64'
             $spec.Architecture | Should -Be 'x86_64'
@@ -23,7 +23,7 @@ Describe 'Get-WinMediaWimlibSpec（wimlib 1.14.5 發行包）' -Tag 'Unit' {
 }
 
 Describe 'Test-WinMediaFileHash（SHA-256 校驗）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaOperation {
         BeforeAll {
             $script:sample = Join-Path -Path $TestDrive -ChildPath 'sample.bin'
             [System.IO.File]::WriteAllText($script:sample, 'abc')
@@ -45,7 +45,7 @@ Describe 'Test-WinMediaFileHash（SHA-256 校驗）' -Tag 'Unit' {
 }
 
 Describe 'Resolve-WinMediaWimlib（手動指定與自動下載）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaWimlib {
         BeforeEach {
             Mock Write-WinMediaLog { }
             Mock Invoke-WinMediaOperation { param([scriptblock]$ScriptBlock) & $ScriptBlock }
@@ -88,7 +88,7 @@ Describe 'Resolve-WinMediaWimlib（手動指定與自動下載）' -Tag 'Unit' {
 }
 
 Describe 'Invoke-WinMediaWimlib（wimlib 專用入口）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaWimlib {
         BeforeEach {
             Mock Write-WinMediaLog { }
             Mock Resolve-WinMediaWimlib { return 'C:\tools\wimlib-imagex.exe' }
@@ -113,7 +113,7 @@ Describe 'Invoke-WinMediaWimlib（wimlib 專用入口）' -Tag 'Unit' {
 }
 
 Describe 'Install-WinMediaAdk（自動安裝 Deployment Tools）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaAdk {
         BeforeEach {
             Mock Write-WinMediaLog { }
             Mock Invoke-WinMediaOperation { param([scriptblock]$ScriptBlock) & $ScriptBlock }
@@ -160,7 +160,7 @@ Describe 'Install-WinMediaAdk（自動安裝 Deployment Tools）' -Tag 'Unit' {
 }
 
 Describe 'Resolve-WinMediaAdk / Resolve-WinMediaOscdimg（缺少時自動安裝）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaAdk {
         BeforeEach {
             Mock Write-WinMediaLog { }
         }
@@ -211,7 +211,7 @@ Describe 'Resolve-WinMediaAdk / Resolve-WinMediaOscdimg（缺少時自動安裝�
 }
 
 Describe 'ESD 轉換與輸出的 wimlib／DISM 分流（§2.4）' -Tag 'Unit' {
-    InModuleScope WinMediaRefresh {
+    InModuleScope WinMediaEsd {
         BeforeEach {
             Mock Write-WinMediaLog { }
             Mock Invoke-WinMediaOperation { param([scriptblock]$ScriptBlock) & $ScriptBlock }

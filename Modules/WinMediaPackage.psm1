@@ -1,4 +1,14 @@
-﻿function Get-WinMediaPackageCategory {
+﻿Set-StrictMode -Version 2.0
+$ErrorActionPreference = 'Stop'
+
+# 更新包分類模組（§2.1、§11.3、§11.4）：依展開後的內容判斷 .cab／.msu 的類別
+# 需要的 Config 鍵：LogLevel／LogFile、DebugTrace、OperationLog
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaLog.psm1') -Force
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaOperation.psm1') -Force
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaProcess.psm1') -Force
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Imaging\WinMediaWimlib.psm1') -Force
+
+function Get-WinMediaPackageCategory {
     <#
     .SYNOPSIS
         將 PackageDir 中的 .cab / .msu 依內容分類（§2.1、§11.4）。
@@ -13,7 +23,7 @@
     .PARAMETER Config
         設定表。
     .EXAMPLE
-        Get-WinMediaPackageCategory -PackageDir 'D:\WinMediaPkgs' -ExpandDir 'C:\WinMediaWork\expand' -Config $config
+        Get-WinMediaPackageCategory -PackageDir '<更新包資料夾>' -ExpandDir '<WorkDir>\expand' -Config $config
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -29,6 +39,7 @@
         Checkpoint   = @()
         LCU          = @()
         SetupDU      = @()
+        Enablement   = @()
         DotNetCU     = @()
         LanguagePack = @()
         FoD          = @()
@@ -61,6 +72,13 @@
             'DotNetCU'     { $result.DotNetCU += $package.FullName }
             'LanguagePack' { $result.LanguagePack += $package.FullName }
             'FoD'          { $result.FoD += $package.FullName }
+            'Enablement'   {
+                # 26H2 啟用套件（eKB）：母檔已含對應功能，略過不套用；版本取自 cab 內的啟用套件 mum 檔名
+                $result.Enablement += $package.FullName
+                $enableMum = Get-ChildItem -LiteralPath (Join-Path -Path $ExpandDir -ChildPath $package.Name) -Recurse -File -Filter '*-Version-Enablement-Package~*.mum' | Select-Object -First 1
+                $version = if ($enableMum -and $enableMum.Name -match '~(\d+\.\d+\.\d+\.\d+)\.mum$') { $Matches[1] } else { '未知' }
+                Write-WinMediaLog -Config $Config -Level Info -Message "26H2 啟用套件略過（母檔已含對應功能，不套用）：$($package.Name)，cab 版本 $version。"
+            }
             default        { $result.Unclassified += $package.FullName }
         }
     }
@@ -89,6 +107,50 @@ function Get-WinMediaPackageCategoryByName {
     }
 }
 
+function Test-WinMediaWimFile {
+    # 讀取檔頭 8 位元組判斷是否為 WIM（MSWIM\0\0\0）；只讀前 8 位元組，避免 4.5 GB 的檔案被整包載入
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $head = New-Object -TypeName byte[] -ArgumentList 8
+        $read = $stream.Read($head, 0, 8)
+    }
+    finally {
+        $stream.Dispose()
+    }
+    return ($read -eq 8 -and [BitConverter]::ToString($head) -eq '4D-53-57-49-4D-00-00-00')
+}
+
+function Expand-WinMediaPackageToDir {
+    # 展開 .cab／.msu 到 Target：WIM 格式（UUP 包的 .msu 常見）改用 wimlib；其餘維持 expand.exe
+    # 注意：expand.exe 對 WIM 檔不會報錯，只會把原檔複製一份，因此不能只看結束碼
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$Package,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    if (Test-WinMediaWimFile -Path $Package) {
+        try {
+            $null = Invoke-WinMediaWimlib -ArgumentList @('extract', $Package, '1', "--dest-dir=$Target", '--no-acls', '--no-attributes') -Config $Config
+            return $true
+        }
+        catch {
+            Write-WinMediaLog -Config $Config -Level Warning -Message "wimlib 展開失敗：$(Split-Path -Path $Package -Leaf)：$($_.Exception.Message)"
+            return $false
+        }
+    }
+    $expand = Invoke-WinMediaExternal -FilePath 'expand.exe' -ArgumentList @('-F:*', $Package, $Target) -Config $Config
+    return ($expand.ExitCode -eq 0)
+}
+
 function Get-WinMediaPackageCategoryByContent {
     # 展開後（含 .msu 內的巢狀 cab）讀取 update.mum 與 manifest 名稱；無法判斷回傳 Unknown
     [CmdletBinding()]
@@ -105,8 +167,8 @@ function Get-WinMediaPackageCategoryByContent {
         Invoke-WinMediaOperation -Category File -Operation 'CreateDirectory' -Target $target -Config $Config -ScriptBlock {
             New-Item -ItemType Directory -Path $target -Force | Out-Null
         } | Out-Null
-        $expand = Invoke-WinMediaExternal -FilePath 'expand.exe' -ArgumentList @('-F:*', $Package, $target) -Config $Config
-        if ($expand.ExitCode -ne 0) {
+        $expanded = Expand-WinMediaPackageToDir -Package $Package -Target $target -Config $Config
+        if (-not $expanded) {
             # 失敗時移除半成品目錄，避免之後重試時被當成已展開
             Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
             return 'Unknown'
@@ -115,7 +177,7 @@ function Get-WinMediaPackageCategoryByContent {
         foreach ($nested in @(Get-ChildItem -LiteralPath $target -File -Filter '*.cab')) {
             $nestedDir = Join-Path -Path $target -ChildPath ('nested-' + $nested.Name)
             New-Item -ItemType Directory -Path $nestedDir -Force | Out-Null
-            $null = Invoke-WinMediaExternal -FilePath 'expand.exe' -ArgumentList @('-F:*', $nested.FullName, $nestedDir) -Config $Config
+            $null = Expand-WinMediaPackageToDir -Package $nested.FullName -Target $nestedDir -Config $Config
         }
     }
 
@@ -129,6 +191,8 @@ function Get-WinMediaPackageCategoryByContent {
     if ($hasNestedLcu -and $hasSsu) { return 'CombinedCU' }
     # 含有巢狀 KB cab 的是累積更新（LCU），不可能是 SafeOS DU，避免完整 LCU 被誤送進 WinRE（§11.4）
     if ($hasNestedLcu) { return 'LCU' }
+    # Setup DU 為扁平 cab、沒有 update.mum，以安裝程式本體辨識（實機 KB5127650 內容；convert-UUP 無此規則）
+    if (-not $mum -and $manifests -contains 'SetupPlatform.exe' -and $manifests -contains 'SetupHost.exe') { return 'SetupDU' }
 
     if ($mumText -match 'Package_for_SafeOSDU') { return 'SafeOS' }
     if ($mumText -match 'Package_for_RollupFix') {
@@ -141,6 +205,10 @@ function Get-WinMediaPackageCategoryByContent {
     if ($mumText -match 'Package_for_DotNetRollup') { return 'DotNetCU' }
     if ($hasSsu) { return 'SSU' }
     if ($manifests | Where-Object { $_ -like 'lp.cab' -or $_ -like '*LXP*' }) { return 'LanguagePack' }
+    # 啟用套件（eKB）：其他規則都不命中才判斷，且需有 update.mum，避免 CU 內含的 manifest 被誤判
+    if ($mum -and ($manifests | Where-Object { $_ -like '*-Version-Enablement-Package~*.mum' })) { return 'Enablement' }
 
     return 'Unknown'
 }
+
+Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent
