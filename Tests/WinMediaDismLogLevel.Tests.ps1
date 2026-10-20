@@ -67,7 +67,7 @@ Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
 
     It 'Mount-WinMediaImage 傳遞 -LogLevel 給 Mount／Dismount' {
         # 此測試只驗證 -LogLevel 傳到 Mount／Dismount；先標記為已相容匯入，避免 pwsh 7 下分派真的匯入 DISM
-        InModuleScope WinMediaDism { $script:DismCompatSource = 'DISM' }
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = 'DISM' }
         Mock -ModuleName WinMediaImage Mount-WindowsImage { } -ParameterFilter { $LogLevel -eq 'Debug' }
         Mock -ModuleName WinMediaImage Dismount-WindowsImage { } -ParameterFilter { $LogLevel -eq 'Debug' }
         Mount-WinMediaImage -ImagePath 'x.wim' -Index 1 -MountPath (Join-Path -Path $TestDrive -ChildPath 'mp') -Action { 'ok' } -Config $script:cfg | Out-Null

@@ -51,7 +51,7 @@ Describe 'Test-WinMediaDismHost：開關檢查（Inbox 與 ADK 相同）' -Tag '
 
 Describe 'Invoke-WinMediaDism：pwsh 7 的先檢查、再匯入' -Tag 'Unit' {
     BeforeEach {
-        InModuleScope WinMediaDism { $script:DismCompatSource = $null }
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = $null }
         Mock -ModuleName WinMediaDism Import-WinMediaDismCompat { }
         Mock -ModuleName WinMediaDism Remove-WinMediaDismLoaded { }
         Mock -ModuleName WinMediaDism Get-WinMediaDismLoaded { $null }
@@ -87,8 +87,16 @@ Describe 'Invoke-WinMediaDism：pwsh 7 的先檢查、再匯入' -Tag 'Unit' {
     }
 
     It '本工作階段已用相容模式載入同一來源時，不再重新匯入' {
-        InModuleScope WinMediaDism { $script:DismCompatSource = 'DISM' }
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = 'DISM' }
         Invoke-WinMediaDism -Provider 'Inbox' -ScriptBlock { 'a' } -Config $script:cfg | Out-Null
+        Should -Invoke -ModuleName WinMediaDism Import-WinMediaDismCompat -Times 0 -Exactly
+    }
+
+    It '模組被 -Force 重新匯入（模組狀態重設）後，已由本工作階段匯入的 Dism 不被移除、不重新匯入' {
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = 'DISM' }
+        Mock -ModuleName WinMediaDism Get-WinMediaDismLoaded { [pscustomobject]@{ Name = 'Dism' } }
+        Invoke-WinMediaDism -Provider 'Inbox' -ScriptBlock { 'a' } -Config $script:cfg | Out-Null
+        Should -Invoke -ModuleName WinMediaDism Remove-WinMediaDismLoaded -Times 0 -Exactly
         Should -Invoke -ModuleName WinMediaDism Import-WinMediaDismCompat -Times 0 -Exactly
     }
 
@@ -113,6 +121,13 @@ Describe 'Invoke-WinMediaDism：pwsh 7 的先檢查、再匯入' -Tag 'Unit' {
 }
 
 Describe 'Import-WinMediaDismCompat：匯入參數（僅 pwsh 7）' -Tag 'Unit' -Skip:(-not $script:isCore) {
+    It '其他警告不併入已知，仍以警告送出' {
+        Mock -ModuleName WinMediaDism Import-Module { Write-Warning '其他警告' }; Mock -ModuleName WinMediaDism Write-WinMediaLog { }; Mock -ModuleName WinMediaDism Write-Warning { }
+        InModuleScope WinMediaDism -Parameters @{ C = $script:cfg } { Import-WinMediaDismCompat -Config $C -Source 'DISM' }
+        Should -Invoke -ModuleName WinMediaDism Write-Warning -Times 1 -Exactly -ParameterFilter { $Message -like '*其他警告*' }
+        Should -Invoke -ModuleName WinMediaDism Write-WinMediaLog -Times 0 -Exactly -ParameterFilter { $Message -like '*已知*' }
+    }
+
     It 'Inbox 以 -Name DISM -UseWindowsPowerShell -Global -PassThru 匯入' {
         Mock -ModuleName WinMediaDism Import-Module { }
         InModuleScope WinMediaDism -Parameters @{ C = $script:cfg } { Import-WinMediaDismCompat -Config $C -Source 'DISM' }
@@ -129,10 +144,10 @@ Describe 'Import-WinMediaDismCompat：匯入參數（僅 pwsh 7）' -Tag 'Unit' 
         }
     }
 
-    It '相容匯入的警告不以警告串流顯示，改記為 Info 日誌' {
-        Mock -ModuleName WinMediaDism Import-Module { Write-Warning '測試警告' }
+    It '相容匯入的 WinPSCompatSession 警告收進 Info 日誌（已知），不以警告串流顯示' {
+        Mock -ModuleName WinMediaDism Import-Module { Write-Warning '模組 WinPSCompatSession 已使用 DISM 遠端處理工作階段載入' }; Mock -ModuleName WinMediaDism Write-Warning { }
         Mock -ModuleName WinMediaDism Write-WinMediaLog { }
         InModuleScope WinMediaDism -Parameters @{ C = $script:cfg } { Import-WinMediaDismCompat -Config $C -Source 'DISM' }
-        Should -Invoke -ModuleName WinMediaDism Write-WinMediaLog -ParameterFilter { $Level -eq 'Info' -and $Message -like '*已知*測試警告*' }
+        Should -Invoke -ModuleName WinMediaDism Write-WinMediaLog -ParameterFilter { $Level -eq 'Info' -and $Message -like '*已知*WinPSCompatSession*' }; Should -Invoke -ModuleName WinMediaDism Write-Warning -Times 0 -Exactly
     }
 }
