@@ -9,6 +9,11 @@ BeforeAll {
     $script:cfg = @{ DismProvider = 'Inbox'; LogLevel = 'Info'; OperationLog = ''; DebugTrace = 0; DismLogLevel = 'Debug'; LogFile = (Join-Path -Path $TestDrive -ChildPath 'loglevel.log') }
 }
 
+AfterAll {
+    # 本檔多個 Describe 會設定相容狀態；檔案結束時清回，避免同一工作階段後續的管線略過相容匯入
+    InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = $null }
+}
+
 Describe 'DismLogLevel 設定與參數' -Tag 'Unit' {
     It '設定檔預設值為 WarningsInfo' {
         $script:default.DismLogLevel | Should -Be 'WarningsInfo'
