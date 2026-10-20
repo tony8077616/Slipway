@@ -60,6 +60,10 @@ Describe 'Invoke-WinMediaDism：pwsh 7 的先檢查、再匯入' -Tag 'Unit' {
         Mock -ModuleName WinMediaDism Resolve-WinMediaAdk { [pscustomobject]@{ Root = 'C:\ADK'; ModulePath = $script:adkModule; DismExe = 'C:\ADK\dism.exe' } }
     }
 
+    AfterAll {
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = $null }
+    }
+
     It 'Windows PowerShell 5.1 不呼叫相容匯入' {
         Mock -ModuleName WinMediaDism Test-WinMediaDismCore { $false }
         Invoke-WinMediaDism -Provider 'Inbox' -ScriptBlock { 'ok' } -Config $script:cfg | Should -Be 'ok'
@@ -149,5 +153,17 @@ Describe 'Import-WinMediaDismCompat：匯入參數（僅 pwsh 7）' -Tag 'Unit' 
         Mock -ModuleName WinMediaDism Write-WinMediaLog { }
         InModuleScope WinMediaDism -Parameters @{ C = $script:cfg } { Import-WinMediaDismCompat -Config $C -Source 'DISM' }
         Should -Invoke -ModuleName WinMediaDism Write-WinMediaLog -ParameterFilter { $Level -eq 'Info' -and $Message -like '*已知*WinPSCompatSession*' }; Should -Invoke -ModuleName WinMediaDism Write-Warning -Times 0 -Exactly
+    }
+}
+
+Describe '相容狀態存於全域，模組重新匯入後仍有效' -Tag 'Unit' {
+    AfterAll {
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = $null }
+    }
+
+    It '模組以 -Force 重新匯入後，已記錄的相容來源保留' {
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = 'DISM' }
+        Import-Module -Name (Join-Path -Path $script:root -ChildPath 'PSModules\Imaging\WinMediaDism.psm1') -Force
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource } | Should -Be 'DISM'
     }
 }

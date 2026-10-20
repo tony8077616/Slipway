@@ -60,6 +60,7 @@ Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
         }
     }
     AfterAll {
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = $null }
         if ($script:stubbed) {
             Remove-Item -Path Function:\Mount-WindowsImage, Function:\Dismount-WindowsImage -ErrorAction SilentlyContinue
         }
@@ -118,6 +119,8 @@ Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
 
 Describe 'DismLogLevel 缺鍵的舊設定檔（相容性）' -Tag 'Unit' {
     It 'Mount-WinMediaImage 缺鍵時由 wrapper 補上 WarningsInfo 再傳給 Mount／Dismount' {
+        # 只驗證缺鍵時的 -LogLevel 預設；先標記為已相容匯入，避免 pwsh 7 下分派真的匯入 DISM
+        InModuleScope WinMediaDism { $global:WinMediaDismCompatSource = 'DISM' }
         $noKey = $script:cfg.Clone()
         [void]$noKey.Remove('DismLogLevel')
         Mock -ModuleName WinMediaImage Mount-WindowsImage { } -ParameterFilter { $LogLevel -eq 'WarningsInfo' }
