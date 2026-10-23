@@ -99,4 +99,13 @@ Describe '主流程接線（Must 1、2、4）' -Tag 'Unit' {
         $direct = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Remove-Item' -and $n.Extent.Text -match '\$dir\b' }, $true))
         $direct.Count | Should -Be 0
     }
+
+    It 'OutputDir 在 Assert 之前以 PowerShell 位置正規化（相對路徑不依行程目錄解析）' {
+        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
+        $norm = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$Config.OutputDir' -and $n.Right.Extent.Text -match 'GetUnresolvedProviderPathFromPSPath' }, $true))
+        $assert = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Assert-WinMediaOutputDir' }, $true))
+        $norm.Count | Should -BeGreaterThan 0
+        $norm[0].Extent.StartOffset | Should -BeLessThan $assert[0].Extent.StartOffset
+    }
 }

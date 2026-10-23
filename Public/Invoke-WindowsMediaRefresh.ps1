@@ -85,6 +85,8 @@
     if ([string]::IsNullOrWhiteSpace($Config.OutputDir)) {
         $Config.OutputDir = Join-Path -Path ([System.IO.Path]::GetPathRoot($PSScriptRoot)) -ChildPath 'WinMediaOut'
     }
+    # 相對路徑依 PowerShell 位置解析；.NET 的 GetFullPath 與 oscdimg 則依行程目錄，兩者不同時保護檢查會對錯路徑
+    $Config.OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Config.OutputDir)
     # 巢狀設定 Clone 為淺複製；補齊輸入路徑前先複製，避免改到呼叫端的設定
     $Config.Drivers = $Config.Drivers.Clone()
     $Config.Lxp = $Config.Lxp.Clone()

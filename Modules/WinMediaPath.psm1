@@ -139,6 +139,7 @@ function Remove-WinMediaWorkDir {
 
 function Assert-WinMediaOutputDir {
     # 成品目錄不得等於或位於會被清理或掛載的目錄之下（Must 2）；否則步驟 12 會連同成品一起刪除
+    # shortcut: 只做字串比對，8.3 短名稱、junction、subst 或指向同一位置的網路磁碟可繞過；有使用者回報別名路徑時改為解析最終路徑（GetFinalPathNameByHandle）
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$OutputDir,
