@@ -490,6 +490,7 @@
                 if ($null -ne $info.UBR) { $nameArgs.Revision = [string]$info.UBR }
                 if ($info.BuildBranch) { $nameArgs.BranchUpper = ([string]$info.BuildBranch).ToUpperInvariant() }
             }
+            if ($targets.Count -lt @($images).Count) { Write-WinMediaLog -Config $Config -Level Warning -Message ('只更新 {0}/{1} 個索引，檔名的建置號與 UBR 取自第一個目標索引，未更新的索引不含這些更新' -f $targets.Count, @($images).Count) }
             if ($finalCount -gt 1) { $nameArgs.Edition = 'CLIENTMULTI' }
             else {
                 $edition = @(Get-WinMediaIndexInfo -ImagePath $installWim -Config $Config)[0].EditionId

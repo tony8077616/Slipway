@@ -85,4 +85,76 @@ Describe 'Get-WinMediaBuildInfo 失敗時降級' -Tag 'Unit' {
         { Get-WinMediaBuildInfo -MountPath $missing -WorkDir $TestDrive -Config $cfg } | Should -Not -Throw
         Get-WinMediaBuildInfo -MountPath $missing -WorkDir $TestDrive -Config $cfg | Should -BeNullOrEmpty
     }
+
+    It '載入失敗時仍嘗試卸載、清除暫存資料夾，且複製 LOG1 與 LOG2' {
+        $mount = Join-Path -Path $TestDrive -ChildPath 'mnt-fail'
+        $cfgDir = Join-Path -Path $mount -ChildPath 'Windows\System32\config'
+        New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $cfgDir -ChildPath 'SOFTWARE') -Value 'hive'
+        $log1 = Join-Path -Path $cfgDir -ChildPath 'SOFTWARE.LOG1'
+        Set-Content -LiteralPath $log1 -Value 'log1'
+        [System.IO.File]::SetAttributes($log1, 'Hidden')
+        $work = Join-Path -Path $TestDrive -ChildPath 'work-fail'
+        New-Item -ItemType Directory -Path $work -Force | Out-Null
+        $cfg = @{ LogLevel = 'Info'; LogFile = (Join-Path -Path $TestDrive -ChildPath 'wm-fail.log'); OperationLog = (Join-Path -Path $TestDrive -ChildPath 'op.txt'); DebugTrace = 0; DismProvider = 'Inbox'; DismLogLevel = 'WarningsInfo'; DismUseWindowsPowerShell = $true }
+        Mock -ModuleName WinMediaIndexInfo Invoke-WinMediaExternal {
+            param($FilePath, $ArgumentList, $Config)
+            Add-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'calls-fail.txt') -Value $ArgumentList[0]
+            if ($ArgumentList[0] -eq 'load') {
+                $copy = $ArgumentList[2]
+                Set-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'seen-fail.txt') -Value ('{0}|{1}|{2}' -f (Test-Path -LiteralPath $copy), (Test-Path -LiteralPath ($copy + '.LOG1')), (Test-Path -LiteralPath ($copy + '.LOG2')))
+                throw 'mock wrapper'
+            }
+            [pscustomobject]@{ ExitCode = 1; StdOut = ''; StdErr = 'mock' }
+        }
+        Get-WinMediaBuildInfo -MountPath $mount -WorkDir $work -Config $cfg | Should -BeNullOrEmpty
+        (Get-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'seen-fail.txt') -Raw).Trim() | Should -BeExactly 'True|True|False'
+        (Get-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'calls-fail.txt')) -join ',' | Should -BeExactly 'load,unload'
+        (Get-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'wm-fail.log') -Raw) | Should -Not -Match 'reg unload'
+        @(Get-ChildItem -LiteralPath $work -Force).Count | Should -Be 0
+    }
+
+    It '成功路徑：讀出版本欄位，依序 load、query、unload，並清除暫存資料夾' {
+        $mount = Join-Path -Path $TestDrive -ChildPath 'mnt-ok'
+        $cfgDir = Join-Path -Path $mount -ChildPath 'Windows\System32\config'
+        New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $cfgDir -ChildPath 'SOFTWARE') -Value 'hive'
+        foreach ($name in 'SOFTWARE.LOG1', 'SOFTWARE.LOG2') {
+            $f = Join-Path -Path $cfgDir -ChildPath $name
+            Set-Content -LiteralPath $f -Value 'log'
+            [System.IO.File]::SetAttributes($f, 'Hidden')
+        }
+        $work = Join-Path -Path $TestDrive -ChildPath 'work-ok'
+        New-Item -ItemType Directory -Path $work -Force | Out-Null
+        $cfg = @{ LogLevel = 'Info'; LogFile = (Join-Path -Path $TestDrive -ChildPath 'wm.log'); OperationLog = (Join-Path -Path $TestDrive -ChildPath 'op.txt'); DebugTrace = 0; DismProvider = 'Inbox'; DismLogLevel = 'WarningsInfo'; DismUseWindowsPowerShell = $true }
+        Mock -ModuleName WinMediaIndexInfo Invoke-WinMediaExternal {
+            param($FilePath, $ArgumentList, $Config)
+            Add-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'calls-ok.txt') -Value $ArgumentList[0]
+            if ($ArgumentList[0] -eq 'load') {
+                $copy = $ArgumentList[2]
+                Set-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'seen-ok.txt') -Value ('{0}|{1}|{2}' -f (Test-Path -LiteralPath $copy), (Test-Path -LiteralPath ($copy + '.LOG1')), (Test-Path -LiteralPath ($copy + '.LOG2')))
+            }
+            if ($ArgumentList[0] -eq 'query') {
+                return [pscustomobject]@{ ExitCode = 0; StdOut = "HKEY_LOCAL_MACHINE\WinMedia_x\Microsoft\Windows NT\CurrentVersion`r`n    DisplayVersion    REG_SZ    26H2`r`n    CurrentBuild    REG_SZ    26300"; StdErr = '' }
+            }
+            [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' }
+        }
+        $r = Get-WinMediaBuildInfo -MountPath $mount -WorkDir $work -Config $cfg
+        $r.DisplayVersion | Should -BeExactly '26H2'
+        $r.CurrentBuild | Should -BeExactly '26300'
+        (Get-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'seen-ok.txt') -Raw).Trim() | Should -BeExactly 'True|True|True'
+        (Get-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'calls-ok.txt')) -join ',' | Should -BeExactly 'load,query,unload'
+        @(Get-ChildItem -LiteralPath $work -Force).Count | Should -Be 0
+    }
+}
+
+Describe '索引數不一致時的檔名警告（主流程）' -Tag 'Unit' {
+    It '更新索引數少於映像索引數時記 Warning' {
+        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
+        $ifs = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -match '^\$targets\.Count -lt @\(\$images\)\.Count$' }, $true))
+        $ifs.Count | Should -Be 1
+        $warn = @($ifs[0].Clauses[0].Item2.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Write-WinMediaLog' -and $n.Extent.Text -match '-Level Warning' }, $true))
+        $warn.Count | Should -Be 1
+    }
 }

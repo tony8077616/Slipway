@@ -60,7 +60,7 @@ function ConvertFrom-WinMediaRegQuery {
 }
 
 function Get-WinMediaBuildInfo {
-    # 從已掛載映像的 SOFTWARE hive 讀版本資訊：複製到 WorkDir 的唯一暫存檔，再以唯一機碼名稱 reg load；失敗只警告並回傳 $null
+    # 從已掛載映像的 SOFTWARE hive 讀版本資訊：複製到 WorkDir 的唯一暫存資料夾（連同 LOG1/LOG2），再以唯一機碼名稱 reg load；失敗只警告並回傳 $null
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MountPath,
@@ -69,12 +69,20 @@ function Get-WinMediaBuildInfo {
     )
 
     $id = [guid]::NewGuid().ToString('N')
-    $copy = Join-Path -Path $WorkDir -ChildPath ('SOFTWARE-{0}.hiv' -f $id)
+    $stage = Join-Path -Path $WorkDir -ChildPath ('hive-{0}' -f $id)
+    $copy = Join-Path -Path $stage -ChildPath 'SOFTWARE'
     $keyName = 'WinMedia_{0}' -f $id
     $reg = Join-Path -Path ([Environment]::GetFolderPath('System')) -ChildPath 'reg.exe'
+    $attempted = $false
     $loaded = $false
     try {
-        Copy-Item -LiteralPath (Join-Path -Path $MountPath -ChildPath 'Windows\System32\config\SOFTWARE') -Destination $copy -Force
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        $hive = Join-Path -Path $MountPath -ChildPath 'Windows\System32\config\SOFTWARE'
+        Copy-Item -LiteralPath $hive -Destination $copy -Force
+        foreach ($ext in '.LOG1', '.LOG2') {
+            if (Test-Path -LiteralPath ($hive + $ext)) { Copy-Item -LiteralPath ($hive + $ext) -Destination ($copy + $ext) -Force }
+        }
+        $attempted = $true
         $load = Invoke-WinMediaExternal -FilePath $reg -ArgumentList @('load', "HKLM\$keyName", $copy) -Config $Config
         if ($load.ExitCode -ne 0) { throw "reg load 失敗（$($load.ExitCode)）：$($load.StdErr)" }
         $loaded = $true
@@ -87,14 +95,15 @@ function Get-WinMediaBuildInfo {
         return $null
     }
     finally {
-        if ($loaded) {
+        # 包裝層可能在 reg.exe 已掛載後才拋例外，所以只要嘗試過 load 就卸載；未確認掛載成功就不警告
+        if ($attempted) {
             try {
                 $unload = Invoke-WinMediaExternal -FilePath $reg -ArgumentList @('unload', "HKLM\$keyName") -Config $Config
-                if ($unload.ExitCode -ne 0) { Write-WinMediaLog -Config $Config -Level Warning -Message ('reg unload 失敗（{0}）：HKLM\{1}' -f $unload.ExitCode, $keyName) }
+                if ($loaded -and $unload.ExitCode -ne 0) { Write-WinMediaLog -Config $Config -Level Warning -Message ('reg unload 失敗（{0}）：HKLM\{1}' -f $unload.ExitCode, $keyName) }
             }
-            catch { Write-WinMediaLog -Config $Config -Level Warning -Message ('reg unload 例外：{0}' -f $_.Exception.Message) }
+            catch { if ($loaded) { Write-WinMediaLog -Config $Config -Level Warning -Message ('reg unload 例外：{0}' -f $_.Exception.Message) } }
         }
-        Remove-Item -LiteralPath $copy -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
