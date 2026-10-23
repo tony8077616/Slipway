@@ -105,4 +105,64 @@ function Resolve-WinMediaMountDir {
     return $resolved
 }
 
-Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir
+function Use-WinMediaWorkDir {
+    # 工作子目錄登記（Must 1）：只有本工具登記過的目錄（同層 <dir>.winmedia-owned）才會被清空；未登記且非空的既有目錄拒絕使用
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $marker = "$Path.winmedia-owned"
+    if (Test-Path -LiteralPath $Path) {
+        if (Test-Path -LiteralPath $marker) {
+            # 上次失敗留下的登記目錄：清空後再用，避免舊檔混進新成品
+            Get-ChildItem -LiteralPath $Path -Force | Remove-Item -Recurse -Force
+            return
+        }
+        if (@(Get-ChildItem -LiteralPath $Path -Force).Count -gt 0) {
+            throw "工作子目錄已存在且不是本工具建立：$Path（若這是舊版失敗後留下的資料夾，請手動刪除後重試）。"
+        }
+    }
+    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    Set-Content -LiteralPath $marker -Value 'WinMediaRefresh' -Encoding ASCII
+}
+
+function Remove-WinMediaWorkDir {
+    # 只刪除登記過的目錄與登記檔；未登記的目錄完全不動
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $marker = "$Path.winmedia-owned"
+    if (-not (Test-Path -LiteralPath $marker)) { return }
+    if (-not $PSCmdlet.ShouldProcess($Path, '刪除工作子目錄')) { return }
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force }
+    Remove-Item -LiteralPath $marker -Force
+}
+
+function Assert-WinMediaOutputDir {
+    # 成品目錄不得等於或位於會被清理或掛載的目錄之下（Must 2）；否則步驟 12 會連同成品一起刪除
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$OutputDir,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ProtectedDir
+    )
+
+    foreach ($dir in $ProtectedDir) {
+        if (Test-PathWithin -Child $OutputDir -Parent $dir) {
+            throw "OutputDir 位於工作或掛載目錄之下，成品會在清理時被刪除：$OutputDir（請改用其他路徑）。"
+        }
+    }
+}
+
+function Resolve-WinMediaLogFile {
+    # 一般 Log（第 1 層）：LogFile 留空時寫到 LogDir\WinMediaRefresh.log；Add-WinMediaTextLine 會建立父目錄
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Config)
+
+    # 設定檔可能沒有這些鍵；StrictMode 下直接讀取不存在的鍵會拋錯，所以先用 ContainsKey 判斷
+    $logFile = if ($Config.ContainsKey('LogFile')) { $Config.LogFile } else { $null }
+    if (-not [string]::IsNullOrWhiteSpace($logFile)) { return [string]$logFile }
+    $logDir = if ($Config.ContainsKey('LogDir')) { $Config.LogDir } else { $null }
+    if ([string]::IsNullOrWhiteSpace($logDir)) { $logDir = Join-Path -Path $Config.WorkDir -ChildPath 'logs' }
+    return (Join-Path -Path $logDir -ChildPath 'WinMediaRefresh.log')
+}
+
+Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile

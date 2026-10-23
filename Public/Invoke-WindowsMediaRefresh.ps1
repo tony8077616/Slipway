@@ -72,6 +72,7 @@
     if ([string]::IsNullOrWhiteSpace($Config.WorkDir) -or -not [System.IO.Path]::IsPathRooted($Config.WorkDir)) {
         throw "WorkDir 必須為絕對路徑，目前為：'$($Config.WorkDir)'。"
     }
+    $Config.LogFile = Resolve-WinMediaLogFile -Config $Config
     if ($MountDir) { $Config.MountDir = $MountDir }
     if ($OutputDir) { $Config.OutputDir = $OutputDir }
     if ($PSBoundParameters.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = $DismLogLevel }
@@ -153,17 +154,25 @@
     $bootWim = Join-Path -Path $sourcesDir -ChildPath 'boot.wim'
     $winreWim = Join-Path -Path $winreDir -ChildPath 'winre.wim'
 
+    # 輸出目錄不得位於會被清理或掛載的目錄之下（Must 2）；須在 Use 迴圈之前檢查，否則已登記目錄會先被清空
+    Assert-WinMediaOutputDir -OutputDir $Config.OutputDir -ProtectedDir @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir, $mountDir)
     # 掛載目錄若已存在且非空，直接中止，不像 Convert-UUP.cmd:1060 那樣 rmdir 既有目錄
     if ((Test-Path -LiteralPath $mountDir) -and @(Get-ChildItem -LiteralPath $mountDir -Force).Count -gt 0) {
         throw "掛載目錄已存在且非空：$mountDir（請指定空目錄或刪除後重試）。"
     }
     $mountDirCreated = -not (Test-Path -LiteralPath $mountDir)
-    foreach ($dir in @($workDir, $mediaDir, $winreDir, $mountDir, $expandDir, $lxpDir, $Config.LogDir, $Config.OutputDir)) {
+    foreach ($dir in @($workDir, $mountDir, $Config.LogDir, $Config.OutputDir)) {
         if (-not (Test-Path -LiteralPath $dir)) {
             Invoke-WinMediaOperation -Category File -Operation 'CreateDirectory' -Target $dir -Config $Config -ScriptBlock {
                 New-Item -ItemType Directory -Path $dir -Force | Out-Null
             } | Out-Null
         }
+    }
+    # 工作子目錄：只清空本工具登記過的，未登記且非空的既有目錄直接拒絕（Must 1）；update-stage 也在此登記，因為 New-WinMediaUpdateStage 會無條件刪除它
+    foreach ($dir in @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir)) {
+        Invoke-WinMediaOperation -Category File -Operation 'UseWorkDir' -Target $dir -Config $Config -ScriptBlock {
+            Use-WinMediaWorkDir -Path $dir
+        } | Out-Null
     }
     $lxpItems = @(Resolve-WinMediaLxp -Path $Config.Lxp.Path -TempDir $lxpDir -Config $Config)
 
@@ -527,14 +536,15 @@
     }
 
     # 步驟 12：成功後才清除工作子目錄；logs 保留
-    $cleanupDirs = @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir)
-    if ($mountDirCreated) { $cleanupDirs += $mountDir }
-    foreach ($dir in $cleanupDirs) {
-        if (Test-Path -LiteralPath $dir) {
-            Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $dir -Config $Config -ScriptBlock {
-                Remove-Item -LiteralPath $dir -Recurse -Force
-            } | Out-Null
-        }
+    foreach ($dir in @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir)) {
+        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $dir -Config $Config -ScriptBlock {
+            Remove-WinMediaWorkDir -Path $dir
+        } | Out-Null
+    }
+    if ($mountDirCreated -and (Test-Path -LiteralPath $mountDir)) {
+        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $mountDir -Config $Config -ScriptBlock {
+            Remove-Item -LiteralPath $mountDir -Recurse -Force
+        } | Out-Null
     }
 
     Write-WinMediaLog -Config $Config -Level Info -Message "完成：$output"
