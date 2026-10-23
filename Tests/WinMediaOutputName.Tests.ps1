@@ -37,8 +37,8 @@ Describe 'New-WinMediaOutputName' -Tag 'Unit' {
 
     It '不符字元規則的段落被丟棄，缺 Build 退回舊格式' {
         $p = $script:full.Clone(); $p.DisplayVersion = 'bad/ver'
-        New-WinMediaOutputName @p | Should -Not -Match 'bad'
-        New-WinMediaOutputName -Timestamp '20261021-081543' | Should -Be 'WinMedia_20261021-081543.iso'
+        New-WinMediaOutputName @p | Should -BeExactly 'WinMedia_26300.9807.GE_RELEASE_CLIENTMULTI_X64FRE_ZH-TW_20261021-081543.iso'
+        New-WinMediaOutputName -Timestamp '20261021-081543' | Should -BeExactly 'WinMedia_20261021-081543.iso'
     }
 }
 

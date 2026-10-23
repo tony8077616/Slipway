@@ -100,6 +100,7 @@ function Get-WinMediaBuildInfo {
 
 function New-WinMediaOutputName {
     # 純函式：組出 ISO 檔名；任一段不符 ^[A-Za-z0-9._-]+$ 就丟棄該段。缺 Build 時退回 WinMedia_<時間戳>.iso
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     [CmdletBinding()]
     param(
         [string]$DisplayVersion,
