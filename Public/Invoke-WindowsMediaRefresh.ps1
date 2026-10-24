@@ -310,6 +310,8 @@
     $bootEx = @{ Applied = $false }
     # 第一個目標索引的 ntoskrnl 版本，供步驟 9 的守衛比對（LCU 未套用到開機索引時會被發現）
     $installKernel = @{ Version = $null }
+    # 第一個目標索引的建置資訊（SOFTWARE hive：CurrentBuild、UBR、DisplayVersion、BuildBranch），供步驟 11 組 ISO 檔名；讀取失敗時保持 $null
+    $buildInfo = @{ Info = $null }
     foreach ($index in $targets) {
         Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) -Config $Config -Action {
             param($mounted)
@@ -346,6 +348,7 @@
             if ($index -eq $targets[0]) { $installKernel.Version = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion }
             # 媒體 sources\xmllite.dll 取自第一個目標索引、已套用 LCU 的版本（convert-UUP 取自 metadata ESD 索引 3，此處沒有該來源）
             if ($index -eq $targets[0]) {
+                $buildInfo.Info = Get-WinMediaBuildInfo -MountPath $mounted -WorkDir $Config.WorkDir -Config $Config
                 Invoke-WinMediaOperation -Category File -Operation 'CopyXmlLite' -Target $sourcesDir -Config $Config -ScriptBlock {
                     Copy-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\xmllite.dll') -Destination (Join-Path -Path $sourcesDir -ChildPath 'xmllite.dll') -Force
                 } | Out-Null
@@ -477,7 +480,31 @@
         Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $output -Config $Config
     }
     else {
-        $output = Join-Path -Path $Config.OutputDir -ChildPath ('WinMedia_{0}.iso' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        # 組 ISO 檔名所需的建置資訊已在步驟 6 讀出；任何失敗只記警告並退回舊格式，不中止整次執行
+        $nameArgs = @{ Timestamp = (Get-Date -Format 'yyyyMMdd-HHmmss'); Arch = $architecture; Languages = @($syncLanguages) }
+        try {
+            $info = $buildInfo.Info
+            if ($info) {
+                $nameArgs.DisplayVersion = $info.DisplayVersion
+                $nameArgs.Build = $info.CurrentBuild
+                if ($null -ne $info.UBR) { $nameArgs.Revision = [string]$info.UBR }
+                if ($info.BuildBranch) { $nameArgs.BranchUpper = ([string]$info.BuildBranch).ToUpperInvariant() }
+            }
+            if ($targets.Count -lt @($images).Count) { Write-WinMediaLog -Config $Config -Level Warning -Message ('只更新 {0}/{1} 個索引，檔名的建置號與 UBR 取自第一個目標索引，未更新的索引不含這些更新' -f $targets.Count, @($images).Count) }
+            if ($finalCount -gt 1) { $nameArgs.Edition = 'CLIENTMULTI' }
+            else {
+                $edition = @(Get-WinMediaIndexInfo -ImagePath $installWim -Config $Config)[0].EditionId
+                if ($edition) { $nameArgs.Edition = 'CLIENT' + ([string]$edition).ToUpperInvariant() }
+            }
+            $idwb = Join-Path -Path $sourcesDir -ChildPath 'idwbinfo.txt'
+            if ((Test-Path -LiteralPath $idwb) -and ((Get-Content -LiteralPath $idwb -Raw) -match '(?m)^\s*BuildType\s*=\s*(\w+)')) { $nameArgs.BuildType = $Matches[1] }
+            $isoName = New-WinMediaOutputName @nameArgs
+        }
+        catch {
+            Write-WinMediaLog -Config $Config -Level Warning -Message ('組 ISO 檔名失敗，改用預設名稱：{0}' -f $_.Exception.Message)
+            $isoName = 'WinMedia_{0}.iso' -f $nameArgs.Timestamp
+        }
+        $output = Join-Path -Path $Config.OutputDir -ChildPath $isoName
         if ((Test-Path -LiteralPath $output) -and -not $Force) {
             throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
         }
