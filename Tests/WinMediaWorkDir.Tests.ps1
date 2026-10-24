@@ -109,3 +109,33 @@ Describe '主流程接線（Must 1、2、4）' -Tag 'Unit' {
         $norm[0].Extent.StartOffset | Should -BeLessThan $assert[0].Extent.StartOffset
     }
 }
+
+Describe 'Resolve-WinMediaLogLocation（OperationLog／LogDir 缺鍵時由 WorkDir 推導，StrictMode 下不拋錯）' -Tag 'Unit' {
+    It '設定只有 WorkDir 時，LogDir 為 WorkDir\logs，OperationLog 為 LogDir\OperationLog.txt' {
+        $work = Join-Path -Path $TestDrive -ChildPath 'work-loc'
+        $loc = Resolve-WinMediaLogLocation -Config @{ WorkDir = $work }
+        $loc.LogDir | Should -BeExactly (Join-Path -Path $work -ChildPath 'logs')
+        $loc.OperationLog | Should -BeExactly (Join-Path -Path $work -ChildPath 'logs\OperationLog.txt')
+    }
+
+    It 'OperationLog 為空字串時原樣保留（空白代表不寫操作紀錄）' {
+        $loc = Resolve-WinMediaLogLocation -Config @{ WorkDir = (Join-Path -Path $TestDrive -ChildPath 'w2'); LogDir = (Join-Path -Path $TestDrive -ChildPath 'l2'); OperationLog = '' }
+        $loc.OperationLog | Should -BeExactly ''
+    }
+
+    It '明確指定的 LogDir 原樣保留，OperationLog 缺鍵時由它推導' {
+        $logDir = Join-Path -Path $TestDrive -ChildPath 'explicit-logs'
+        $loc = Resolve-WinMediaLogLocation -Config @{ WorkDir = $TestDrive; LogDir = $logDir }
+        $loc.LogDir | Should -BeExactly $logDir
+        $loc.OperationLog | Should -BeExactly (Join-Path -Path $logDir -ChildPath 'OperationLog.txt')
+    }
+
+    It '主流程在第一個 Invoke-WinMediaOperation 之前呼叫 Resolve-WinMediaLogLocation（AST）' {
+        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
+        $loc = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Resolve-WinMediaLogLocation' }, $true))
+        $op = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-WinMediaOperation' }, $true))
+        $loc.Count | Should -BeGreaterThan 0
+        $loc[0].Extent.StartOffset | Should -BeLessThan $op[0].Extent.StartOffset
+    }
+}
