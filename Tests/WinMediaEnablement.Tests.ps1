@@ -5,7 +5,9 @@ BeforeAll {
     Import-Module -Name (Join-Path -Path $script:root -ChildPath 'Modules\WinMediaPackage.psm1') -Force
     $script:cfg = @{ LogLevel = 'Verbose'; LogFile = (Join-Path -Path $TestDrive -ChildPath 'enable.log'); OperationLog = ''; DebugTrace = 0; DismProvider = 'Inbox' }
     $script:enableMum = 'Microsoft-Windows-Ge-Client-Server-26300-Version-Enablement-Package~31bf3856ad364e35~amd64~~10.0.26100.9544.mum'
-    function New-EnablePackage([string]$Name, [string[]]$Files) {
+    function New-EnablePackage {
+        [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = '測試輔助函式，只在 TestDrive 內建立檔案')]
+        param([string]$Name, [string[]]$Files)
         $pkgDir = Join-Path -Path $TestDrive -ChildPath ('pkg-' + [guid]::NewGuid().ToString('N'))
         $expandDir = Join-Path -Path $TestDrive -ChildPath ('exp-' + [guid]::NewGuid().ToString('N'))
         [IO.Directory]::CreateDirectory($pkgDir) | Out-Null

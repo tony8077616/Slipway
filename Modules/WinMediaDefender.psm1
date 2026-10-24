@@ -77,13 +77,14 @@ function Remove-WinMediaDefenderExclusion {
     .SYNOPSIS
         移除先前由 Add-WinMediaDefenderExclusion 新增的路徑排除；失敗只警告，供 finally 呼叫。
     #>
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [string[]]$Path
     )
 
     foreach ($item in @($Path)) {
         if ([string]::IsNullOrWhiteSpace($item)) { continue }
+        if (-not $PSCmdlet.ShouldProcess($item, '移除 Windows Defender 排除')) { continue }
         try {
             Remove-MpPreference -ExclusionPath $item
         }

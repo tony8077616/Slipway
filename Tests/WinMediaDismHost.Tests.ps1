@@ -1,4 +1,6 @@
 ﻿#Requires -Version 5.1
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = '重設正式程式 WinMediaDism 的相容狀態（$global:WinMediaDismCompatSource）；InModuleScope 內無法改用 script 範圍')]
+param()
 
 $script:isCore = ($PSVersionTable.PSEdition -eq 'Core')
 

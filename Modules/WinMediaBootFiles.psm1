@@ -26,6 +26,7 @@ function Copy-WinMediaBootFile {
 function Copy-WinMediaUpdatedBootFiles {
     # 選項 UpdateBootFiles（對應 convert-UUP 的 UpdtBootFiles=1，3903–3930 行）
     # 來源是已套用 LCU 的安裝映像。回傳 $true 表示已使用 *_EX 開機檔；呼叫端據此跳過步驟 9 的 WinPE 開機管理員覆寫
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = '公開名稱，改名會破壞呼叫端')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MountPath,
@@ -139,6 +140,7 @@ function Copy-WinMediaSetupDuFiles {
     # 對應 convert-UUP 2349–2358 行：根目錄檔案 xcopy /U，只覆蓋媒體上既有的檔；*.ini 不限既有檔
     # 不套用 /D（比較時間戳）：實測 SetupPlatform 輸入為 9443、DU 為 9685，但 DU 的時間（09-10）早於輸入（09-13），參考採用的是 DU 版本
     # 語言子資料夾（名稱含 -）只在媒體已有該語言的 *.mui 時整個複製；replacementmanifests 遞迴複製；其餘子資料夾忽略
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = '公開名稱，改名會破壞呼叫端')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$ExpandedDir,
@@ -185,6 +187,7 @@ function Copy-WinMediaBootWimSources {
     # 對應 convert-UUP bin\boot-wim.txt（約 1130–1145 行）：媒體 sources\ 內列在 bootwim.txt 的檔案覆蓋 WinPE 索引 2 的同名檔（媒體 → WinPE）
     # bootmui.txt 的語言 mui 依語言資料夾（小寫）處理；媒體沒有的檔案略過（convert-UUP 的 if exist）
     # 另加入媒體根目錄 setup.exe 與 sources\inf\setup.cfg（convert-UUP 同一份清單的 add 行）
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = '公開名稱，改名會破壞呼叫端')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MediaDir,
@@ -280,7 +283,7 @@ function Get-WinMediaEffectiveLanguage {
 
 function Remove-WinMediaExtraLanguage {
     # 媒體複製後移除不在保留集合（Get-WinMediaEffectiveLanguage）內的語言資料夾，使媒體與 WinPE 的語言一致；只刪含 .mui 的語言資料夾
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$MediaDir,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Languages,
@@ -296,6 +299,7 @@ function Remove-WinMediaExtraLanguage {
             $_.Name -match '^[a-zA-Z]{2,3}-[a-zA-Z0-9-]+$' -and $keep -notcontains $_.Name -and (Get-ChildItem -LiteralPath $_.FullName -Filter '*.mui' -File | Select-Object -First 1)
         })
     foreach ($dir in $extra) {
+        if (-not $PSCmdlet.ShouldProcess($dir.FullName, '移除額外語言資料夾')) { continue }
         Invoke-WinMediaOperation -Category File -Operation 'PruneLanguage' -Target $dir.FullName -Config $Config -ScriptBlock {
             Remove-Item -LiteralPath $dir.FullName -Recurse -Force
         } | Out-Null

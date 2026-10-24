@@ -15,11 +15,11 @@ Describe 'Copy-WinMediaBootWimSources（convert-UUP bootwim.txt／bootmui.txt：
         Set-Content -LiteralPath $script:wimList -Value @('# 註解', 'setuphost.exe', '', 'missing.dll')
         Set-Content -LiteralPath $script:muiList -Value @('acres.dll.mui', 'absent.mui')
         # 記錄每次 wimlib 呼叫的參數與 stdin 指令內容（stdin 檔在呼叫結束後會被刪除，所以在 mock 內讀取）
-        $global:WimCalls = New-Object System.Collections.ArrayList
-        $global:WimStdin = New-Object System.Collections.ArrayList
+        $script:WimCalls = New-Object System.Collections.ArrayList
+        $script:WimStdin = New-Object System.Collections.ArrayList
         Mock -ModuleName WinMediaBootFiles Invoke-WinMediaWimlib {
-            $null = $global:WimCalls.Add(($ArgumentList -join ' '))
-            if ($StandardInputPath) { $null = $global:WimStdin.Add([System.IO.File]::ReadAllText($StandardInputPath)) }
+            $null = $script:WimCalls.Add(($ArgumentList -join ' '))
+            if ($StandardInputPath) { $null = $script:WimStdin.Add([System.IO.File]::ReadAllText($StandardInputPath)) }
             [pscustomobject]@{ ExitCode = 0 }
         }
     }
@@ -33,7 +33,7 @@ Describe 'Copy-WinMediaBootWimSources（convert-UUP bootwim.txt／bootmui.txt：
 
         Copy-WinMediaBootWimSources -MediaDir $script:media -WimPath $script:wim -Index 2 -WimListPath $script:wimList -MuiListPath $script:muiList -Languages @('zh-TW') -Config $script:config
 
-        $stdin = $global:WimStdin -join "`n"
+        $stdin = $script:WimStdin -join "`n"
         $stdin | Should -Match ([regex]::Escape("add '{0}' '\sources\setuphost.exe'" -f (Join-Path $script:media 'sources\setuphost.exe')))
         $stdin | Should -Not -Match 'missing\.dll'
     }
@@ -43,9 +43,9 @@ Describe 'Copy-WinMediaBootWimSources（convert-UUP bootwim.txt／bootmui.txt：
 
         Copy-WinMediaBootWimSources -MediaDir $script:media -WimPath $script:wim -Index 2 -WimListPath $script:wimList -MuiListPath $script:muiList -Languages @('zh-TW') -Config $script:config
 
-        $global:WimCalls.Count | Should -Be 1
-        $global:WimCalls[0] | Should -Be ('update {0} 2' -f $script:wim)
-        $global:WimStdin.Count | Should -Be 1
+        $script:WimCalls.Count | Should -Be 1
+        $script:WimCalls[0] | Should -Be ('update {0} 2' -f $script:wim)
+        $script:WimStdin.Count | Should -Be 1
     }
 
     It '不以 Copy-Item 覆寫 WinPE（映像內 ACL 會拒絕 Administrators 寫入）' {
@@ -62,7 +62,7 @@ Describe 'Copy-WinMediaBootWimSources（convert-UUP bootwim.txt／bootmui.txt：
 
         Copy-WinMediaBootWimSources -MediaDir $script:media -WimPath $script:wim -Index 2 -WimListPath $script:wimList -MuiListPath $script:muiList -Languages @('zh-TW') -Config $script:config
 
-        $stdin = $global:WimStdin -join "`n"
+        $stdin = $script:WimStdin -join "`n"
         $stdin | Should -Match "'\\sources\\zh-tw\\acres\.dll\.mui'"
         $stdin | Should -Not -Match 'absent\.mui'
     }
@@ -73,7 +73,7 @@ Describe 'Copy-WinMediaBootWimSources（convert-UUP bootwim.txt／bootmui.txt：
 
         Copy-WinMediaBootWimSources -MediaDir $script:media -WimPath $script:wim -Index 2 -WimListPath $script:wimList -MuiListPath $script:muiList -Languages @('zh-TW') -Config $script:config
 
-        $stdin = $global:WimStdin -join "`n"
+        $stdin = $script:WimStdin -join "`n"
         $stdin | Should -Match "'\\setup\.exe'"
         $stdin | Should -Match "'\\sources\\inf\\setup\.cfg'"
     }
@@ -85,13 +85,13 @@ Describe 'Copy-WinMediaBootWimSources（convert-UUP bootwim.txt／bootmui.txt：
 
         Copy-WinMediaBootWimSources -MediaDir $script:media -WimPath $script:wim -Index 2 -WimListPath $script:wimList -MuiListPath $script:muiList -Languages @() -Config $script:config
 
-        $global:WimCalls.Count | Should -Be 1
-        @($global:WimStdin[0] -split "`n" | Where-Object { $_ }).Count | Should -Be 45
+        $script:WimCalls.Count | Should -Be 1
+        @($script:WimStdin[0] -split "`n" | Where-Object { $_ }).Count | Should -Be 45
     }
 
     It '沒有任何媒體檔案時不呼叫 wimlib' {
         Copy-WinMediaBootWimSources -MediaDir $script:media -WimPath $script:wim -Index 2 -WimListPath $script:wimList -MuiListPath $script:muiList -Languages @('zh-TW') -Config $script:config
 
-        $global:WimCalls.Count | Should -Be 0
+        $script:WimCalls.Count | Should -Be 0
     }
 }

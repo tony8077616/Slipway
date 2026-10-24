@@ -553,6 +553,6 @@
     return $output
     }
     finally {
-        Remove-WinMediaDefenderExclusion -Path $defenderAdded
+        Remove-WinMediaDefenderExclusion -Path $defenderAdded -Confirm:$false
     }
 }

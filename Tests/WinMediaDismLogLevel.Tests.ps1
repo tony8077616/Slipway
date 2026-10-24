@@ -1,4 +1,6 @@
 ﻿#Requires -Version 5.1
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = '重設正式程式 WinMediaDism 的相容狀態（$global:WinMediaDismCompatSource）；InModuleScope 內無法改用 script 範圍')]
+param()
 
 BeforeAll {
     $script:root = Split-Path -Parent $PSScriptRoot
@@ -60,8 +62,8 @@ Describe 'DISM cmdlet 皆帶 -LogLevel' -Tag 'Unit' {
         # pwsh 7 會自動載入原生 Dism（Get-Command 找得到），Mock 在模組範圍內無法綁定；改用同簽章樁函式，只在 pwsh 7 測試期間存在
         $script:stubbed = ($PSVersionTable.PSEdition -eq 'Core')
         if ($script:stubbed) {
-            function global:Mount-WindowsImage { param($ImagePath, $Index, $Path, [switch]$ReadOnly, $LogLevel) }
-            function global:Dismount-WindowsImage { param($Path, [switch]$Save, [switch]$Discard, $LogLevel) }
+            function global:Mount-WindowsImage { param($ImagePath, $Index, $Path, [switch]$ReadOnly, $LogLevel) $null = $ImagePath, $Index, $Path, $ReadOnly, $LogLevel }
+            function global:Dismount-WindowsImage { param($Path, [switch]$Save, [switch]$Discard, $LogLevel) $null = $Path, $Save, $Discard, $LogLevel }
         }
     }
     AfterAll {
