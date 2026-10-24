@@ -547,15 +547,12 @@
     }
 
     # 步驟 12：成功後才清除工作子目錄；logs 保留
+    # 單一目錄刪不掉只記警告，其餘目錄照常清除；ISO 已完成，不因清理失敗而報錯
     foreach ($dir in @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir)) {
-        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $dir -Config $Config -ScriptBlock {
-            Remove-WinMediaWorkDir -Path $dir
-        } | Out-Null
+        Remove-WinMediaCleanupDir -Path $dir -Config $Config -Confirm:$false
     }
     if ($mountDirCreated -and (Test-Path -LiteralPath $mountDir)) {
-        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $mountDir -Config $Config -ScriptBlock {
-            Remove-Item -LiteralPath $mountDir -Recurse -Force
-        } | Out-Null
+        Remove-WinMediaCleanupDir -Path $mountDir -Config $Config -Remove { Remove-Item -LiteralPath $Path -Recurse -Force } -Confirm:$false
     }
 
     Write-WinMediaLog -Config $Config -Level Info -Message "完成：$output"

@@ -95,7 +95,7 @@ Describe '主流程接線（Must 1、2、4）' -Tag 'Unit' {
         $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
         $names = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | ForEach-Object { $_.GetCommandName() })
-        foreach ($name in 'Resolve-WinMediaLogFile', 'Assert-WinMediaOutputDir', 'Use-WinMediaWorkDir', 'Remove-WinMediaWorkDir') { $names | Should -Contain $name }
+        foreach ($name in 'Resolve-WinMediaLogFile', 'Assert-WinMediaOutputDir', 'Use-WinMediaWorkDir', 'Remove-WinMediaCleanupDir') { $names | Should -Contain $name }
         $direct = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Remove-Item' -and $n.Extent.Text -match '\$dir\b' }, $true))
         $direct.Count | Should -Be 0
     }

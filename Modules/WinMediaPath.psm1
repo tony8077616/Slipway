@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 # 路徑規則模組：重疊檢查、輸入資料夾預設值、掛載目錄解析
 # 所有路徑淨化經由 PSModules\Common\PathSanitize.psm1
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\PathSanitize.psm1') -Force
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaOperation.psm1') -Force
 
 function Test-WinMediaPathOverlap {
     # §3.4：更新原始檔、驅動、LXP、WorkDir 兩兩不得重疊（相等、包含或被包含）
@@ -188,6 +189,24 @@ function Resolve-WinMediaLegacyInputSection {
     }
 }
 
+function Remove-WinMediaCleanupDir {
+    # 清理失敗只記警告，不取代已完成的映像結果（DESIGN 2026-10-16 第 (8) 項）；失敗仍會留下 failure 紀錄
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][hashtable]$Config,
+        [scriptblock]$Remove = { Remove-WinMediaWorkDir -Path $Path }
+    )
+
+    if (-not $PSCmdlet.ShouldProcess($Path, '清除工作目錄')) { return }
+    try {
+        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $Path -Config $Config -ScriptBlock $Remove | Out-Null
+    }
+    catch {
+        Write-Warning ('無法清除 {0}：{1}' -f $Path, $_.Exception.Message)
+    }
+}
+
 function Mount-WinMediaSourceIso {
     # 已掛載（例如使用者自行掛載）的 ISO 不再掛載，回報 Mounted = $false，主流程據此不卸載
     [CmdletBinding(SupportsShouldProcess)]
@@ -200,4 +219,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso
+Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
