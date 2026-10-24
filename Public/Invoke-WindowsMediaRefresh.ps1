@@ -91,6 +91,8 @@
     }
     # 相對路徑依 PowerShell 位置解析；.NET 的 GetFullPath 與 oscdimg 則依行程目錄，兩者不同時保護檢查會對錯路徑
     $Config.OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Config.OutputDir)
+    # 舊設定檔缺 Lang／Fod／StoreApps 時先補空路徑，須在下方 Clone 之前（Clone 會直接讀取這些鍵）
+    Resolve-WinMediaLegacyInputSection -Config $Config
     # 巢狀設定 Clone 為淺複製；補齊輸入路徑前先複製，避免改到呼叫端的設定
     $Config.Drivers = $Config.Drivers.Clone()
     $Config.Lxp = $Config.Lxp.Clone()
@@ -99,6 +101,9 @@
     $Config.Fod = $Config.Fod.Clone()
     $Config.StoreApps = $Config.StoreApps.Clone()
     Resolve-WinMediaInputPath -RootDir $script:ModuleRoot -Config $Config
+
+    # 字串誤設為 ForceUnsigned 時在此中止，不靜默變成 $true（未簽章驅動會被注入）
+    $forceUnsigned = Resolve-WinMediaForceUnsigned -Config $Config
 
     # 步驟 1：前置檢查
     $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -128,7 +133,6 @@
     }
     Test-WinMediaPathOverlap -Paths @{ PackageDir = $Config.PackageDir; WorkDir = $Config.WorkDir; Drivers = $Config.Drivers.Path; Lxp = $Config.Lxp.Path; Lang = $Config.Lang.Path; Fod = $Config.Fod.Path; StoreApps = $Config.StoreApps.Path }
     $driverSet = Resolve-WinMediaDriverSet -Path $Config.Drivers.Path -Config $Config
-    $forceUnsigned = [bool]$Config.Drivers.ForceUnsigned
     $appxList = Resolve-WinMediaAppxList -Path $Config.Apps.CustomAppsList -Mode $Config.Apps.CustomListMode -Config $Config
     $langFod = Resolve-WinMediaLangFodSet -LangPath $Config.Lang.Path -FodPath $Config.Fod.Path -Config $Config
     $storeSet = Resolve-WinMediaStoreAppSet -Path $Config.StoreApps.Path -Config $Config

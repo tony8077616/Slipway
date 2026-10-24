@@ -178,4 +178,14 @@ function Resolve-WinMediaLogLocation {
     return @{ LogDir = $logDir; OperationLog = $operationLog }
 }
 
-Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation
+function Resolve-WinMediaLegacyInputSection {
+    # 舊格式設定檔可能沒有 Lang、Fod、StoreApps；缺鍵時補空路徑，主流程之後以 StrictMode 讀取 .Path 才不會崩潰
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Config)
+
+    foreach ($key in 'Lang', 'Fod', 'StoreApps') {
+        if (-not $Config.ContainsKey($key) -or $null -eq $Config[$key]) { $Config[$key] = @{ Path = '' } }
+    }
+}
+
+Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection

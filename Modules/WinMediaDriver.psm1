@@ -72,4 +72,16 @@ function Install-WinMediaDriver {
     }
 }
 
-Export-ModuleMember -Function Resolve-WinMediaDriverSet, Install-WinMediaDriver
+function Resolve-WinMediaForceUnsigned {
+    # 字串（例如 'false'）經 [bool] 轉型會變成 $true，改為直接拒絕；缺鍵視為 $false
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][hashtable]$Config)
+
+    if (-not $Config.Drivers.ContainsKey('ForceUnsigned')) { return $false }
+    $value = $Config.Drivers.ForceUnsigned
+    if ($value -isnot [bool]) { throw "Drivers.ForceUnsigned 必須是 `$true 或 `$false（布林），目前為：'$value'。" }
+    return $value
+}
+
+Export-ModuleMember -Function Resolve-WinMediaDriverSet, Install-WinMediaDriver, Resolve-WinMediaForceUnsigned

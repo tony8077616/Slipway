@@ -51,3 +51,34 @@ Describe '輸入資料夾集中於腳本目錄（Resolve-WinMediaInputPath）' -
         }
     }
 }
+
+Describe '舊設定檔缺 Lang／Fod／StoreApps（Resolve-WinMediaLegacyInputSection）' -Tag 'Unit' {
+    InModuleScope WinMediaPath {
+        It '缺鍵時補上空路徑，之後以 StrictMode 讀取 .Path 不拋錯' {
+            $cfg = @{ PackageDir = ''; Drivers = @{ Path = '' }; Lxp = @{ Path = '' }; Apps = @{ CustomAppsList = '' } }
+            Resolve-WinMediaLegacyInputSection -Config $cfg
+            Set-StrictMode -Version 2.0
+            { $cfg.Lang.Path } | Should -Not -Throw
+            { $cfg.Fod.Path } | Should -Not -Throw
+            { $cfg.StoreApps.Path } | Should -Not -Throw
+            $cfg.Lang.Path | Should -BeNullOrEmpty
+            $cfg.StoreApps.Path | Should -BeNullOrEmpty
+        }
+
+        It '已指定的 Lang 路徑不被覆寫' {
+            $cfg = @{ Lang = @{ Path = 'D:\Lang' } }
+            Resolve-WinMediaLegacyInputSection -Config $cfg
+            $cfg.Lang.Path | Should -Be 'D:\Lang'
+        }
+    }
+
+    It '主流程在 Lang／Fod／StoreApps 的 Clone 之前呼叫（AST）' {
+        $file = Join-Path -Path $PSScriptRoot -ChildPath '..\Public\Invoke-WindowsMediaRefresh.ps1'
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $file).Path, [ref]$null, [ref]$null)
+        $calls = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Resolve-WinMediaLegacyInputSection' }, $true))
+        $clone = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.InvokeMemberExpressionAst] -and $n.Member.Value -eq 'Clone' -and $n.Expression.Extent.Text -eq '$Config.Lang' }, $true))
+        $calls.Count | Should -Be 1
+        $clone.Count | Should -Be 1
+        $calls[0].Extent.StartOffset | Should -BeLessThan $clone[0].Extent.StartOffset
+    }
+}
