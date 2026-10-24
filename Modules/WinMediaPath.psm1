@@ -188,4 +188,16 @@ function Resolve-WinMediaLegacyInputSection {
     }
 }
 
-Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection
+function Mount-WinMediaSourceIso {
+    # 已掛載（例如使用者自行掛載）的 ISO 不再掛載，回報 Mounted = $false，主流程據此不卸載
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][string]$ImagePath)
+
+    if (-not $PSCmdlet.ShouldProcess($ImagePath, '掛載 ISO')) { return }
+    $image = Get-DiskImage -ImagePath $ImagePath
+    $mounted = -not $image.Attached
+    if ($mounted) { $image = Mount-DiskImage -ImagePath $ImagePath -StorageType ISO -PassThru }
+    return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
+}
+
+Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso

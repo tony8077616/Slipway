@@ -192,9 +192,9 @@
     }
 
     # 步驟 2：掛載母檔（唯讀）並複製；母檔不修改（§3.3）
-    $iso = Mount-DiskImage -ImagePath $SourceIso -StorageType ISO -PassThru
+    $isoMount = Mount-WinMediaSourceIso -ImagePath $SourceIso -Confirm:$false
     try {
-        $driveLetter = ($iso | Get-Volume).DriveLetter
+        $driveLetter = $isoMount.DriveLetter
         if (-not $driveLetter) { throw '無法取得 ISO 的磁碟機代號。' }
         $isoRoot = '{0}:\' -f $driveLetter
         Invoke-WinMediaOperation -Category File -Operation 'CopyMedia' -Target $mediaDir -Config $Config -ScriptBlock {
@@ -202,7 +202,8 @@
         } | Out-Null
     }
     finally {
-        Dismount-DiskImage -ImagePath $SourceIso | Out-Null
+        # 使用者事先掛載的 ISO 不卸載（Mounted = $false）
+        if ($isoMount.Mounted) { Dismount-DiskImage -ImagePath $SourceIso | Out-Null }
     }
     Get-ChildItem -LiteralPath $mediaDir -Recurse -Force -File | ForEach-Object { $_.IsReadOnly = $false }
     # 步驟 2 之後、2a 之前：移除未選取的額外語言（先於步驟 8 的 Setup DU，使 /U 規則不會把它們建回來）
