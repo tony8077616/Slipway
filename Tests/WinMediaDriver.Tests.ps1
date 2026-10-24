@@ -2,6 +2,23 @@
 
 Import-Module -Name (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'WinMediaRefresh.psd1') -Force
 
+Describe 'Resolve-WinMediaForceUnsigned（Drivers.ForceUnsigned 必須為布林）' -Tag 'Unit' {
+    InModuleScope WinMediaDriver {
+        It '字串 ''false'' 直接中止，不靜默轉為 $true' {
+            { Resolve-WinMediaForceUnsigned -Config @{ Drivers = @{ ForceUnsigned = 'false' } } } | Should -Throw '*必須*布林*'
+        }
+
+        It '布林 $true 與 $false 原樣回傳' {
+            Resolve-WinMediaForceUnsigned -Config @{ Drivers = @{ ForceUnsigned = $true } } | Should -BeTrue
+            Resolve-WinMediaForceUnsigned -Config @{ Drivers = @{ ForceUnsigned = $false } } | Should -BeFalse
+        }
+
+        It '缺鍵時視為 $false（安全預設）' {
+            Resolve-WinMediaForceUnsigned -Config @{ Drivers = @{ Path = '' } } | Should -BeFalse
+        }
+    }
+}
+
 Describe 'Test-WinMediaPathOverlap（§3.4）' -Tag 'Unit' {
     InModuleScope WinMediaPath {
         It '完全獨立的路徑通過' {

@@ -177,7 +177,11 @@ function Get-WinMediaPackageCategoryByContent {
         foreach ($nested in @(Get-ChildItem -LiteralPath $target -File -Filter '*.cab')) {
             $nestedDir = Join-Path -Path $target -ChildPath ('nested-' + $nested.Name)
             New-Item -ItemType Directory -Path $nestedDir -Force | Out-Null
-            $null = Expand-WinMediaPackageToDir -Package $nested.FullName -Target $nestedDir -Config $Config
+            if (-not (Expand-WinMediaPackageToDir -Package $nested.FullName -Target $nestedDir -Config $Config)) {
+                # 巢狀展開失敗同樣移除半成品目錄，否則下次重跑會被當成已展開而略過
+                Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+                return 'Unknown'
+            }
         }
     }
 

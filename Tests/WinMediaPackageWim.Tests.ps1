@@ -90,4 +90,29 @@ Describe 'Get-WinMediaPackageCategoryByContent（WIM 格式 .msu）' -Tag 'Unit'
         Should -Invoke -CommandName Invoke-WinMediaWimlib -ModuleName WinMediaPackage -Times 1 -Exactly
         Should -Invoke -CommandName Invoke-WinMediaExternal -ModuleName WinMediaPackage -ParameterFilter { $ArgumentList[1] -like '*.msu' } -Times 0 -Exactly
     }
+
+    It '巢狀 cab 展開失敗時移除半成品目錄並回傳 Unknown，下次重跑會重新展開' {
+        $pkgDir = Join-Path -Path $TestDrive -ChildPath 'pkg-nested-fail'
+        $expandDir = Join-Path -Path $TestDrive -ChildPath 'expand-nested-fail'
+        [IO.Directory]::CreateDirectory($pkgDir) | Out-Null
+        [IO.Directory]::CreateDirectory($expandDir) | Out-Null
+        $msu = Join-Path -Path $pkgDir -ChildPath 'Windows11.0-KB9999999-x64.msu'
+        [IO.File]::WriteAllBytes($msu, $script:cabHeader)
+        $target = Join-Path -Path $expandDir -ChildPath 'Windows11.0-KB9999999-x64.msu'
+
+        Mock -ModuleName WinMediaPackage Expand-WinMediaPackageToDir {
+            if ($Package -notlike '*.msu') { return $false }
+            [IO.File]::WriteAllText((Join-Path -Path $Target -ChildPath 'inner.cab'), 'payload')
+            return $true
+        }
+
+        InModuleScope WinMediaPackage -Parameters @{ P = $msu; E = $expandDir; C = $script:config } {
+            Get-WinMediaPackageCategoryByContent -Package $P -ExpandDir $E -Config $C
+        } | Should -Be 'Unknown'
+        Test-Path -LiteralPath $target | Should -BeFalse
+        InModuleScope WinMediaPackage -Parameters @{ P = $msu; E = $expandDir; C = $script:config } {
+            Get-WinMediaPackageCategoryByContent -Package $P -ExpandDir $E -Config $C
+        } | Out-Null
+        Should -Invoke -CommandName Expand-WinMediaPackageToDir -ModuleName WinMediaPackage -ParameterFilter { $Package -like '*.msu' } -Times 2 -Exactly
+    }
 }

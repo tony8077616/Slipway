@@ -91,6 +91,8 @@
     }
     # 相對路徑依 PowerShell 位置解析；.NET 的 GetFullPath 與 oscdimg 則依行程目錄，兩者不同時保護檢查會對錯路徑
     $Config.OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Config.OutputDir)
+    # 舊設定檔缺 Lang／Fod／StoreApps 時先補空路徑，須在下方 Clone 之前（Clone 會直接讀取這些鍵）
+    Resolve-WinMediaLegacyInputSection -Config $Config
     # 巢狀設定 Clone 為淺複製；補齊輸入路徑前先複製，避免改到呼叫端的設定
     $Config.Drivers = $Config.Drivers.Clone()
     $Config.Lxp = $Config.Lxp.Clone()
@@ -99,6 +101,9 @@
     $Config.Fod = $Config.Fod.Clone()
     $Config.StoreApps = $Config.StoreApps.Clone()
     Resolve-WinMediaInputPath -RootDir $script:ModuleRoot -Config $Config
+
+    # 字串誤設為 ForceUnsigned 時在此中止，不靜默變成 $true（未簽章驅動會被注入）
+    $forceUnsigned = Resolve-WinMediaForceUnsigned -Config $Config
 
     # 步驟 1：前置檢查
     $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -128,7 +133,6 @@
     }
     Test-WinMediaPathOverlap -Paths @{ PackageDir = $Config.PackageDir; WorkDir = $Config.WorkDir; Drivers = $Config.Drivers.Path; Lxp = $Config.Lxp.Path; Lang = $Config.Lang.Path; Fod = $Config.Fod.Path; StoreApps = $Config.StoreApps.Path }
     $driverSet = Resolve-WinMediaDriverSet -Path $Config.Drivers.Path -Config $Config
-    $forceUnsigned = [bool]$Config.Drivers.ForceUnsigned
     $appxList = Resolve-WinMediaAppxList -Path $Config.Apps.CustomAppsList -Mode $Config.Apps.CustomListMode -Config $Config
     $langFod = Resolve-WinMediaLangFodSet -LangPath $Config.Lang.Path -FodPath $Config.Fod.Path -Config $Config
     $storeSet = Resolve-WinMediaStoreAppSet -Path $Config.StoreApps.Path -Config $Config
@@ -188,9 +192,9 @@
     }
 
     # 步驟 2：掛載母檔（唯讀）並複製；母檔不修改（§3.3）
-    $iso = Mount-DiskImage -ImagePath $SourceIso -StorageType ISO -PassThru
+    $isoMount = Mount-WinMediaSourceIso -ImagePath $SourceIso -Confirm:$false
     try {
-        $driveLetter = ($iso | Get-Volume).DriveLetter
+        $driveLetter = $isoMount.DriveLetter
         if (-not $driveLetter) { throw '無法取得 ISO 的磁碟機代號。' }
         $isoRoot = '{0}:\' -f $driveLetter
         Invoke-WinMediaOperation -Category File -Operation 'CopyMedia' -Target $mediaDir -Config $Config -ScriptBlock {
@@ -198,7 +202,8 @@
         } | Out-Null
     }
     finally {
-        Dismount-DiskImage -ImagePath $SourceIso | Out-Null
+        # 使用者事先掛載的 ISO 不卸載（Mounted = $false）
+        if ($isoMount.Mounted) { Dismount-DiskImage -ImagePath $SourceIso | Out-Null }
     }
     Get-ChildItem -LiteralPath $mediaDir -Recurse -Force -File | ForEach-Object { $_.IsReadOnly = $false }
     # 步驟 2 之後、2a 之前：移除未選取的額外語言（先於步驟 8 的 Setup DU，使 /U 規則不會把它們建回來）
@@ -542,15 +547,12 @@
     }
 
     # 步驟 12：成功後才清除工作子目錄；logs 保留
+    # 單一目錄刪不掉只記警告，其餘目錄照常清除；ISO 已完成，不因清理失敗而報錯
     foreach ($dir in @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir)) {
-        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $dir -Config $Config -ScriptBlock {
-            Remove-WinMediaWorkDir -Path $dir
-        } | Out-Null
+        Remove-WinMediaCleanupDir -Path $dir -Config $Config -Confirm:$false
     }
     if ($mountDirCreated -and (Test-Path -LiteralPath $mountDir)) {
-        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $mountDir -Config $Config -ScriptBlock {
-            Remove-Item -LiteralPath $mountDir -Recurse -Force
-        } | Out-Null
+        Remove-WinMediaCleanupDir -Path $mountDir -Config $Config -Remove { Remove-Item -LiteralPath $Path -Recurse -Force } -Confirm:$false
     }
 
     Write-WinMediaLog -Config $Config -Level Info -Message "完成：$output"
