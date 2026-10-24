@@ -36,10 +36,10 @@
 
 ### 第三方工具（已打包）
 
-- `tools/wimlib/wimlib-1.14.5-windows-x86_64-bin.zip`：wimlib 1.14.5 x64 Windows 版，供 ESD 輸出使用。
-  - 來源：<https://wimlib.net/downloads/>；SHA-256 取自 wimlib 論壇 1.14.5 公告 <https://wimlib.net/forums/viewtopic.php?t=1133>，與 `tools/wimlib/SHA256SUMS.txt` 一致。
-  - 授權：ZIP 內含 `COPYING.GPLv3.txt`、`COPYING.LGPL.txt` 等授權檔，依其條款散布。
-  - 使用：不需手動設定。執行時會先以此壓縮檔解壓出 wimlib，校驗不符即中止。若要改用其他 `wimlib-imagex.exe`，設定 `Wimlib.Path`。
+- wimlib 1.14.5 x64（ESD 輸出用）：本 repo 不附帶 wimlib 壓縮檔，執行時依下列順序取得。
+  - 來源：<https://wimlib.net/downloads/>；SHA-256 取自 wimlib 論壇 1.14.5 公告 <https://wimlib.net/forums/viewtopic.php?t=1133>，程式內以常數比對。
+  - 內附路徑：若把同名 zip 放在子模組的 `PSModules\Imaging\tools\wimlib\`，會優先使用，同樣校驗 SHA-256；不符即中止。
+  - 其他：未指定時下載，解壓到 `%LOCALAPPDATA%\WinMediaRefresh\tools\wimlib-1.14.5\`。若要改用其他 `wimlib-imagex.exe`，設定 `Wimlib.Path`。
 - `oscdimg.exe` 與 ADK 的 DISM 不包含於本 repo，缺少時由模組自動安裝 ADK Deployment Tools（需系統管理員權限）。
 
 ### 示例
@@ -175,7 +175,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Invoke-Validatio
 
 ## 授權
 
-本專案以 [MIT 授權](LICENSE) 發佈。打包的 wimlib 為 GPLv3／LGPL，依其條款散布，授權檔包含於 `tools/wimlib/` 的壓縮檔內。
+本專案以 [MIT 授權](LICENSE) 發佈。本 repo 不散布 wimlib；執行時下載的 wimlib 為 GPLv3／LGPL，授權檔包含於該壓縮檔內。
 
 ## 相關文檔
 
