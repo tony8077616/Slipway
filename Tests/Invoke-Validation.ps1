@@ -9,7 +9,8 @@ param()
 $root = Split-Path -Parent $PSScriptRoot
 
 Import-Module -Name Pester -RequiredVersion 6.2.0 -ErrorAction Stop
-$pester = Invoke-Pester -Path (Join-Path -Path $root -ChildPath 'Tests') -PassThru
+# Keel（PSModules）的測試也要跑；與 Slipway 測試同一行程執行
+$pester = Invoke-Pester -Path @((Join-Path -Path $root -ChildPath 'Tests'), (Join-Path -Path $root -ChildPath 'PSModules\Tests')) -PassThru
 if ($pester.FailedCount -gt 0) {
     throw "Pester 失敗 $($pester.FailedCount) 項。"
 }
