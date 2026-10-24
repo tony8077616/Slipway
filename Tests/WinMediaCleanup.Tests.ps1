@@ -20,8 +20,22 @@ Describe 'Remove-WinMediaCleanupDir（清理失敗只記警告）' -Tag 'Unit' {
         It '可指定自訂刪除動作（掛載目錄以 Remove-Item 清除）' {
             $dir = Join-Path -Path $TestDrive -ChildPath 'mount-x'
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
-            Remove-WinMediaCleanupDir -Path $dir -Config $script:cfg -Remove { Remove-Item -LiteralPath $Path -Recurse -Force } -Confirm:$false
+            Remove-WinMediaCleanupDir -Path $dir -Config $script:cfg -Remove { param($p) Remove-Item -LiteralPath $p -Recurse -Force } -Confirm:$false
             Test-Path -LiteralPath $dir | Should -BeFalse
+        }
+
+        It '主流程（WinMediaRefresh 模組內）傳入的 -Remove 能刪除掛載目錄（作用域回歸）' {
+            $dir = Join-Path -Path $TestDrive -ChildPath 'mount-scope'
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $cfg = @{ LogLevel = 'Error'; OperationLog = ''; DebugTrace = 0; LogFile = (Join-Path -Path $TestDrive -ChildPath 'scope.log') }
+            Mock -ModuleName WinMediaPath Write-Warning {}
+            # 與 Public\Invoke-WindowsMediaRefresh.ps1 步驟 12 相同：scriptblock 建立於 WinMediaRefresh 模組，helper 位於 WinMediaPath
+            InModuleScope WinMediaRefresh -Parameters @{ D = $dir; C = $cfg } {
+                param($D, $C)
+                Remove-WinMediaCleanupDir -Path $D -Config $C -Remove { param($p) Remove-Item -LiteralPath $p -Recurse -Force } -Confirm:$false
+            }
+            Test-Path -LiteralPath $dir | Should -BeFalse
+            Should -Invoke -CommandName Write-Warning -ModuleName WinMediaPath -Times 0 -Exactly
         }
     }
 
@@ -32,5 +46,21 @@ Describe 'Remove-WinMediaCleanupDir（清理失敗只記警告）' -Tag 'Unit' {
         $direct = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Remove-WinMediaWorkDir' }, $true))
         $helper.Count | Should -BeGreaterThan 0
         $direct.Count | Should -Be 0
+    }
+
+    It '主流程傳給 -Remove 的 scriptblock 有 param 區塊，且不引用外部的 $Path（作用域守護）' {
+        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
+        $calls = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Remove-WinMediaCleanupDir' }, $true))
+        $calls.Count | Should -BeGreaterThan 0
+        foreach ($call in $calls) {
+            $bind = @($call.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -eq 'Remove' })
+            if ($bind.Count -eq 0) { continue }
+            $block = $call.CommandElements[$call.CommandElements.IndexOf($bind[0]) + 1]
+            $block | Should -BeOfType ([System.Management.Automation.Language.ScriptBlockExpressionAst])
+            $block.ScriptBlock.ParamBlock | Should -Not -BeNullOrEmpty
+            $outer = @($block.ScriptBlock.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -eq 'Path' }, $true))
+            $outer.Count | Should -Be 0
+        }
     }
 }

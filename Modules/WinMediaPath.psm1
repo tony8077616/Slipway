@@ -191,16 +191,18 @@ function Resolve-WinMediaLegacyInputSection {
 
 function Remove-WinMediaCleanupDir {
     # 清理失敗只記警告，不取代已完成的映像結果（DESIGN 2026-10-16 第 (8) 項）；失敗仍會留下 failure 紀錄
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Remove', Justification = '由 Invoke-WinMediaOperation 的 scriptblock 閉包使用，PSSA 無法追蹤')]
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][hashtable]$Config,
-        [scriptblock]$Remove = { Remove-WinMediaWorkDir -Path $Path }
+        # 路徑以參數傳入，不依賴作用域：呼叫端的 scriptblock 綁在其所屬模組，看不到這裡的 $Path
+        [scriptblock]$Remove = { param($p) Remove-WinMediaWorkDir -Path $p }
     )
 
     if (-not $PSCmdlet.ShouldProcess($Path, '清除工作目錄')) { return }
     try {
-        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $Path -Config $Config -ScriptBlock $Remove | Out-Null
+        Invoke-WinMediaOperation -Category File -Operation 'RemoveWorkDir' -Target $Path -Config $Config -ScriptBlock { & $Remove $Path } | Out-Null
     }
     catch {
         Write-Warning ('無法清除 {0}：{1}' -f $Path, $_.Exception.Message)
