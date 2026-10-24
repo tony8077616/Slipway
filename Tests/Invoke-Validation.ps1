@@ -15,9 +15,8 @@ if ($pester.FailedCount -gt 0) {
 }
 
 Import-Module -Name PSScriptAnalyzer -ErrorAction Stop
-# 通用模組位於專案內的 PSModules（submodule），一併掃描
-$analyzed = @($root, (Join-Path -Path $root -ChildPath 'PSModules'))
-$issues = @($analyzed | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Recurse -Severity Error, Warning })
+# 掃描 root 即包含 PSModules（submodule）；root 本身不排除任何路徑，不得再列一次，否則每則警告重複計算
+$issues = @(Invoke-ScriptAnalyzer -Path $root -Recurse -Severity Error, Warning)
 if ($issues.Count -gt 0) {
     $issues | Format-Table -AutoSize Severity, RuleName, ScriptName, Line | Out-String | Write-Output
     throw "PSScriptAnalyzer 發現 $($issues.Count) 項 Error／Warning。"
