@@ -166,4 +166,16 @@ function Resolve-WinMediaLogFile {
     return (Join-Path -Path $logDir -ChildPath 'WinMediaRefresh.log')
 }
 
-Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile
+function Resolve-WinMediaLogLocation {
+    # 操作紀錄位置：Invoke-WinMediaOperation 直接讀取 OperationLog，設定檔沒有這兩個鍵時先由 WorkDir 推導；OperationLog 有鍵就原樣保留（空白＝不寫操作紀錄）
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([Parameter(Mandatory)][hashtable]$Config)
+
+    $logDir = if ($Config.ContainsKey('LogDir')) { $Config.LogDir } else { $null }
+    if ([string]::IsNullOrWhiteSpace($logDir)) { $logDir = Join-Path -Path $Config.WorkDir -ChildPath 'logs' }
+    $operationLog = if ($Config.ContainsKey('OperationLog')) { $Config.OperationLog } else { Join-Path -Path $logDir -ChildPath 'OperationLog.txt' }
+    return @{ LogDir = $logDir; OperationLog = $operationLog }
+}
+
+Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation

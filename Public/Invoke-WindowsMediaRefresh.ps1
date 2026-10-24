@@ -72,6 +72,10 @@
     if ([string]::IsNullOrWhiteSpace($Config.WorkDir) -or -not [System.IO.Path]::IsPathRooted($Config.WorkDir)) {
         throw "WorkDir 必須為絕對路徑，目前為：'$($Config.WorkDir)'。"
     }
+    # 設定檔可能沒有 LogDir／OperationLog；Invoke-WinMediaOperation 直接讀取 OperationLog，須在第一次呼叫前補齊
+    $location = Resolve-WinMediaLogLocation -Config $Config
+    $Config.LogDir = $location.LogDir
+    $Config.OperationLog = $location.OperationLog
     $Config.LogFile = Resolve-WinMediaLogFile -Config $Config
     if ($MountDir) { $Config.MountDir = $MountDir }
     if ($OutputDir) { $Config.OutputDir = $OutputDir }
