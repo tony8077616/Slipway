@@ -36,10 +36,14 @@
 
 ### 第三方工具（已打包）
 
-- wimlib 1.14.5 x64（ESD 輸出用）：本 repo 不附帶 wimlib 壓縮檔，執行時依下列順序取得。
+- wimlib 1.14.5（ESD 輸出用）：本 repo 不附帶 wimlib 壓縮檔。檔名依主機架構為 `wimlib-1.14.5-windows-<架構>-bin.zip`，架構為 `x86_64`、`aarch64`、`i686` 其中之一。
   - 來源：<https://wimlib.net/downloads/>；SHA-256 取自 wimlib 論壇 1.14.5 公告 <https://wimlib.net/forums/viewtopic.php?t=1133>，程式內以常數比對。
-  - 內附路徑：若把同名 zip 放在子模組的 `PSModules\Imaging\tools\wimlib\`，會優先使用，同樣校驗 SHA-256；不符即中止。
-  - 其他：未指定時下載，解壓到 `%LOCALAPPDATA%\WinMediaRefresh\tools\wimlib-1.14.5\`。若要改用其他 `wimlib-imagex.exe`，設定 `Wimlib.Path`。
+  - 未設定 `Wimlib.Path` 時，依下列順序取得：
+    1. `%LOCALAPPDATA%\WinMediaRefresh\tools\wimlib-1.14.5\` 內的 wimlib 通過完整性檢查（zip 內容逐檔比對，多餘檔案會被拒絕）→ 直接使用；
+    2. 快取中已驗證的 zip → 重新解壓；
+    3. 子模組內附路徑 `PSModules\Imaging\tools\wimlib\<檔名>`，SHA-256 相符才使用；不符則略過，改走下一步；
+    4. 下載，SHA-256 不符即刪除並中止。
+  - 設定 `Wimlib.Path` 指向既有的 `wimlib-imagex.exe` 時，檔案存在即直接使用，不做 SHA-256 校驗。
 - `oscdimg.exe` 與 ADK 的 DISM 不包含於本 repo，缺少時由模組自動安裝 ADK Deployment Tools（需系統管理員權限）。
 
 ### 示例
