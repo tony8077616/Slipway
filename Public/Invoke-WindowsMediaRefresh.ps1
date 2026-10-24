@@ -552,7 +552,7 @@
         Remove-WinMediaCleanupDir -Path $dir -Config $Config -Confirm:$false
     }
     if ($mountDirCreated -and (Test-Path -LiteralPath $mountDir)) {
-        Remove-WinMediaCleanupDir -Path $mountDir -Config $Config -Remove { Remove-Item -LiteralPath $Path -Recurse -Force } -Confirm:$false
+        Remove-WinMediaCleanupDir -Path $mountDir -Config $Config -Remove { param($p) Remove-Item -LiteralPath $p -Recurse -Force } -Confirm:$false
     }
 
     Write-WinMediaLog -Config $Config -Level Info -Message "完成：$output"

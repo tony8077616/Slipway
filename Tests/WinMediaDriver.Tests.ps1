@@ -19,6 +19,17 @@ Describe 'Resolve-WinMediaForceUnsigned（Drivers.ForceUnsigned 必須為布林�
     }
 }
 
+Describe '主流程接線：ForceUnsigned 經 Resolve-WinMediaForceUnsigned（AST）' -Tag 'Unit' {
+    It '主流程呼叫 Resolve-WinMediaForceUnsigned，且不再以 [bool] 強制轉型 Drivers.ForceUnsigned' {
+        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
+        $resolve = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Resolve-WinMediaForceUnsigned' }, $true))
+        $cast = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.ConvertExpressionAst] -and $n.Extent.Text -match 'Drivers\.ForceUnsigned' }, $true))
+        $resolve.Count | Should -Be 1
+        $cast.Count | Should -Be 0
+    }
+}
+
 Describe 'Test-WinMediaPathOverlap（§3.4）' -Tag 'Unit' {
     InModuleScope WinMediaPath {
         It '完全獨立的路徑通過' {
