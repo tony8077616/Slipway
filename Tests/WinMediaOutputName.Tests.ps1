@@ -99,6 +99,7 @@ Describe 'Get-WinMediaBuildInfo 失敗時降級' -Tag 'Unit' {
         $cfg = @{ LogLevel = 'Info'; LogFile = (Join-Path -Path $TestDrive -ChildPath 'wm-fail.log'); OperationLog = (Join-Path -Path $TestDrive -ChildPath 'op.txt'); DebugTrace = 0; DismProvider = 'Inbox'; DismLogLevel = 'WarningsInfo'; DismUseWindowsPowerShell = $true }
         Mock -ModuleName WinMediaIndexInfo Invoke-WinMediaExternal {
             param($FilePath, $ArgumentList, $Config)
+            $null = $FilePath, $Config
             Add-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'calls-fail.txt') -Value $ArgumentList[0]
             if ($ArgumentList[0] -eq 'load') {
                 $copy = $ArgumentList[2]
@@ -129,6 +130,7 @@ Describe 'Get-WinMediaBuildInfo 失敗時降級' -Tag 'Unit' {
         $cfg = @{ LogLevel = 'Info'; LogFile = (Join-Path -Path $TestDrive -ChildPath 'wm.log'); OperationLog = (Join-Path -Path $TestDrive -ChildPath 'op.txt'); DebugTrace = 0; DismProvider = 'Inbox'; DismLogLevel = 'WarningsInfo'; DismUseWindowsPowerShell = $true }
         Mock -ModuleName WinMediaIndexInfo Invoke-WinMediaExternal {
             param($FilePath, $ArgumentList, $Config)
+            $null = $FilePath, $Config
             Add-Content -LiteralPath (Join-Path -Path $TestDrive -ChildPath 'calls-ok.txt') -Value $ArgumentList[0]
             if ($ArgumentList[0] -eq 'load') {
                 $copy = $ArgumentList[2]
