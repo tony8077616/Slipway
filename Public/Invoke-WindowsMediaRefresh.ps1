@@ -170,7 +170,8 @@
     }
     $mountDirCreated = -not (Test-Path -LiteralPath $mountDir)
     # 審查第 8 則：WorkDir 根目錄（預設在磁碟根目錄下）擁有者不合格或為 junction 時中止；每次都重新套用關閉繼承的 ACL
-    Initialize-WinMediaWorkRoot -Path $workDir
+    # 此前 Write-WinMediaLog（LogDir）與 Resolve-WinMediaWimlib／Install-WinMediaAdk（WorkDir\downloads）可能已寫入，判斷是否為空時排除
+    Initialize-WinMediaWorkRoot -Path $workDir -IgnorePath @($Config.LogDir, $Config.LogFile, $Config.OperationLog, (Join-Path -Path $workDir -ChildPath 'downloads'))
     # 審查第 15 則：上次被強制結束而遺留的排除，不論本次是否開啟 DefenderExclusions 都先還原
     $defenderState = Resolve-WinMediaDefenderStatePath -WorkDir $workDir
     Restore-WinMediaDefenderExclusion -StatePath $defenderState -AllowedPath @($workDir, $mountDir, $Config.OutputDir) -Confirm:$false
