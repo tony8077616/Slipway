@@ -190,19 +190,19 @@ Describe 'Install-WinMediaStoreApp（注入前重驗雜湊，fail-closed）' -Ta
 
     It '沒有 Hashes 的 Set 一律拒絕，且不呼叫 DISM' {
         $old = [pscustomobject]@{ Frameworks = @(); Apps = @($script:app) }
-        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $old -Config $script:config } | Should -Throw
+        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $old -Config $script:config } | Should -Throw -ExpectedMessage '*拒絕注入*'
         Should -Invoke -CommandName Invoke-WinMediaDism -ModuleName WinMediaStoreApps -Times 0 -Exactly
     }
 
     It 'app 在 Resolve 之後被換掉時拒絕' {
         [IO.File]::WriteAllText($script:app, 'tampered')
-        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $script:hSet -Config $script:config } | Should -Throw
+        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $script:hSet -Config $script:config } | Should -Throw -ExpectedMessage '*拒絕注入*'
         Should -Invoke -CommandName Invoke-WinMediaDism -ModuleName WinMediaStoreApps -Times 0 -Exactly
     }
 
     It '框架在 Resolve 之後被換掉時拒絕' {
         [IO.File]::WriteAllText($script:fw, 'tampered')
-        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $script:hSet -Config $script:config } | Should -Throw
+        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $script:hSet -Config $script:config } | Should -Throw -ExpectedMessage '*拒絕注入*'
         Should -Invoke -CommandName Invoke-WinMediaDism -ModuleName WinMediaStoreApps -Times 0 -Exactly
     }
 
@@ -210,13 +210,13 @@ Describe 'Install-WinMediaStoreApp（注入前重驗雜湊，fail-closed）' -Ta
         [IO.File]::WriteAllText($script:lic, 'license')
         $script:hashes[$script:lic] = (& $script:sha $script:lic)
         [IO.File]::WriteAllText($script:lic, 'tampered')
-        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $script:hSet -Config $script:config } | Should -Throw
+        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $script:hSet -Config $script:config } | Should -Throw -ExpectedMessage '*拒絕注入*'
         Should -Invoke -CommandName Invoke-WinMediaDism -ModuleName WinMediaStoreApps -Times 0 -Exactly
     }
 
     It 'Resolve 之後才出現的授權 xml 拒絕' {
         [IO.File]::WriteAllText($script:lic, 'late')
-        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $script:hSet -Config $script:config } | Should -Throw
+        { Install-WinMediaStoreApp -MountPath 'C:\mnt' -Set $script:hSet -Config $script:config } | Should -Throw -ExpectedMessage '*拒絕注入*'
         Should -Invoke -CommandName Invoke-WinMediaDism -ModuleName WinMediaStoreApps -Times 0 -Exactly
     }
 
