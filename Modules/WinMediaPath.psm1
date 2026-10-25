@@ -209,6 +209,18 @@ function Get-WinMediaVolumeFileSystem {
     try { return ([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($Path))).DriveFormat } catch { return $null }
 }
 
+function Test-WinMediaWorkRootAclTrusted {
+    # 根目錄 ACL 是否仍是 Get-WinMediaWorkDirSecurity 的狀態：受保護（不繼承），且 ACE 只有 SYSTEM 與 Administrators
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $acl = Get-Acl -LiteralPath $Path
+    if (-not $acl.AreAccessRulesProtected) { return $false }
+    $sids = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value })
+    return ($sids.Count -gt 0 -and @($sids | Where-Object { @('S-1-5-18', 'S-1-5-32-544') -notcontains $_ }).Count -eq 0)
+}
+
 function Initialize-WinMediaWorkRoot {
     # 審查第 8 則：WorkDir 根目錄（預設在磁碟根目錄下）建立或沿用時一律重新套用 ACL；舊版目錄繼承了 D:\ 的 Authenticated Users 修改權限，只在建立時修一次不夠
     # 審查 HIGH：只接手本工具建立（<WorkDir>\.winmedia-workroot）或為空的目錄，避免 -WorkDir 'E:\' 或使用者資料夾的權限被整棵改掉
@@ -233,19 +245,31 @@ function Initialize-WinMediaWorkRoot {
         if ((Get-Item -LiteralPath $Path -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
             throw "WorkDir 是 reparse point（junction 或符號連結），拒絕使用：$Path（請改用一般資料夾）。"
         }
+        $ownerAllowed = @('S-1-5-18', 'S-1-5-32-544', [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
         if ($aclSupported) {
             $owner = Get-WinMediaPathOwnerSid -Path $Path
-            $allowed = @('S-1-5-18', 'S-1-5-32-544', [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
-            if ($allowed -notcontains $owner.Value) {
+            if ($ownerAllowed -notcontains $owner.Value) {
                 throw "WorkDir 已存在，但擁有者 $($owner.Value) 不是 Administrators、SYSTEM 或目前使用者，拒絕使用：$Path（請先刪除該目錄後重試）。"
             }
         }
-        if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) {
-            $ignore = @($IgnorePath | Where-Object { $_ } | ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\') })
-            # 允許清單內的項目若是 reparse point 也不算本次建立
-            $foreign = @(Get-ChildItem -LiteralPath $Path -Force | Where-Object { ($ignore -notcontains $_.FullName.TrimEnd('\')) -or ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) })
-            if ($foreign.Count -gt 0) {
-                throw "工作目錄已存在且不是本工具建立：$Path（若這是舊版失敗後留下的資料夾，請手動刪除後重試）。"
+        # origin/main 從不寫標記，所以標記只在根目錄 ACL 仍是本工具設定的狀態時可信；非 NTFS 卷無 ACL 可驗證，有標記即信任
+        $trusted = (Test-Path -LiteralPath $marker -PathType Leaf) -and (-not $aclSupported -or (Test-WinMediaWorkRootAclTrusted -Path $Path))
+        if (-not $trusted) {
+            # 允許清單：標記本身，以及 IgnorePath 各自在 WorkDir 底下的頂層祖先（WorkDir\a\logs → WorkDir\a）
+            $prefix = $full + '\'
+            $allowed = @($prefix + '.winmedia-workroot')
+            foreach ($p in @($IgnorePath | Where-Object { $_ })) {
+                $f = [System.IO.Path]::GetFullPath($p).TrimEnd('\')
+                if ($f.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { $allowed += $prefix + $f.Substring($prefix.Length).Split('\')[0] }
+            }
+            # 允許的頂層項目也不得是 reparse point，擁有者也要合格（攻擊者可能搶先建立自己擁有的 downloads）；更深層內容不檢查
+            $blocking = @(foreach ($item in Get-ChildItem -LiteralPath $Path -Force) {
+                if (($allowed -notcontains $item.FullName.TrimEnd('\')) -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { $item.Name }
+                elseif ($aclSupported -and $ownerAllowed -notcontains (Get-WinMediaPathOwnerSid -Path $item.FullName).Value) { $item.Name }
+            })
+            if ($blocking.Count -gt 0) {
+                $shown = (@($blocking | Select-Object -First 5) -join '、') + $(if ($blocking.Count -gt 5) { ' 等' } else { '' })
+                throw "工作目錄已存在且不是本工具建立：$Path；擋住執行的項目：$shown（請改用新的或空的 WorkDir，或把 OutputDir、MountDir 移出 WorkDir）。"
             }
             Set-Content -LiteralPath $marker -Value 'WinMediaRefresh' -Encoding ASCII
         }

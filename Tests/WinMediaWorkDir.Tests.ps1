@@ -265,7 +265,22 @@ Describe 'Initialize-WinMediaWorkRoot 只接手本工具建立、已登記或為
         Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 1 -Exactly
     }
 
+    It 'Test-WinMediaWorkRootAclTrusted：只有受保護且 ACE 僅 SYSTEM／Administrators 時為 True' {
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-trust'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        & (Get-Module -Name WinMediaPath) { param($p) Test-WinMediaWorkRootAclTrusted -Path $p } $root | Should -BeFalse
+        Mock -ModuleName WinMediaPath Get-Acl { Get-WinMediaWorkDirSecurity }
+        & (Get-Module -Name WinMediaPath) { param($p) Test-WinMediaWorkRootAclTrusted -Path $p } $root | Should -BeTrue
+        Mock -ModuleName WinMediaPath Get-Acl {
+            $s = Get-WinMediaWorkDirSecurity
+            $s.AddAccessRule((New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList @([System.Security.Principal.SecurityIdentifier]'S-1-5-11', 'Modify', 'Allow')))
+            $s
+        }
+        & (Get-Module -Name WinMediaPath) { param($p) Test-WinMediaWorkRootAclTrusted -Path $p } $root | Should -BeFalse
+    }
+
     It '有根目錄標記且 ACL 受信任的既有目錄（含上次的內容）每次都重新套用 ACL' {
+        Mock -ModuleName WinMediaPath Test-WinMediaWorkRootAclTrusted { $true }
         $root = Join-Path -Path $TestDrive -ChildPath 'wr-registered'
         New-Item -ItemType Directory -Path (Join-Path -Path $root -ChildPath 'media') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path -Path $root -ChildPath '.winmedia-workroot') -Value 'WinMediaRefresh' -Encoding ASCII
