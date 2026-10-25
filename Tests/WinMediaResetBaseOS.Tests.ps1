@@ -12,6 +12,10 @@ Describe 'Resolve-WinMediaResetBaseOS（ResetBaseOS 必須為布林）' -Tag 'Un
             { Resolve-WinMediaResetBaseOS -Config @{ ResetBaseOS = 'false' } } | Should -Throw '*必須*布林*'
         }
 
+        It '錯誤訊息顯示字面的 $true 與 $false（不展開成 True／False）' {
+            { Resolve-WinMediaResetBaseOS -Config @{ ResetBaseOS = 'false' } } | Should -Throw -ExpectedMessage '*$true 或 $false*'
+        }
+
         It '布林 $true 與 $false 原樣回傳' {
             Resolve-WinMediaResetBaseOS -Config @{ ResetBaseOS = $true } | Should -BeTrue
             Resolve-WinMediaResetBaseOS -Config @{ ResetBaseOS = $false } | Should -BeFalse

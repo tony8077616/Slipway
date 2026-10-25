@@ -477,7 +477,7 @@ function Resolve-WinMediaResetBaseOS {
 
     if (-not $Config.ContainsKey('ResetBaseOS')) { return $false }
     $value = $Config.ResetBaseOS
-    if ($value -isnot [bool]) { throw "ResetBaseOS 必須是 $true 或 $false（布林），目前為：'$value'。" }
+    if ($value -isnot [bool]) { throw "ResetBaseOS 必須是 `$true 或 `$false（布林），目前為：'$value'。" }
     return $value
 }
 

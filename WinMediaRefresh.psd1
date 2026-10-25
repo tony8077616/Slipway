@@ -9,7 +9,8 @@
         'Invoke-WindowsMediaRefresh',
         'Export-WinMediaEsd',
         'Add-WinMediaVirtualEdition',
-        'Get-WinMediaPackageCategory'
+        'Get-WinMediaPackageCategory',
+        'Save-WinMediaUpdate'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
