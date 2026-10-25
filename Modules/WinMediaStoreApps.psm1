@@ -20,7 +20,8 @@ function Test-WinMediaMicrosoftSignature {
 
     $sig = Get-AuthenticodeSignature -LiteralPath $Path
     $subject = if ($sig.SignerCertificate) { [string]$sig.SignerCertificate.Subject } else { '' }
-    $ok = ($sig.Status -eq 'Valid') -and ($subject -match '(^|,\s*)O=Microsoft Corporation(,|$)')
+    # 值內含逗號或換行時 Subject 會加引號；真正的 Microsoft 簽署者主體沒有引號，有就拒絕（防引號 CN 繞過）
+    $ok = ($sig.Status -eq 'Valid') -and ($subject -notmatch '"') -and ($subject -match '(^|,\s*)O=Microsoft Corporation(,|$)')
     if (-not $ok) {
         Write-WinMediaLog -Config $Config -Level Error -Message "StoreApps 簽章驗證失敗（狀態：$($sig.Status)，簽署者：$subject）：$(Split-Path -Path $Path -Leaf)"
     }

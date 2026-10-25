@@ -25,6 +25,33 @@ Describe 'Test-WinMediaMicrosoftSignature（簽章判定）' -Tag 'Unit' {
         }
     }
 
+    It '引號 CN 內夾帶 O=Microsoft Corporation 的假簽署者被拒' {
+        $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+        $req = New-Object -TypeName System.Security.Cryptography.X509Certificates.CertificateRequest -ArgumentList 'CN="x, O=Microsoft Corporation, y", O=Evil', $rsa, ([System.Security.Cryptography.HashAlgorithmName]::SHA256), ([System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $script:quotedCert = $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(1))
+        Mock -ModuleName WinMediaStoreApps Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'Valid'; SignerCertificate = $script:quotedCert }
+        }
+        InModuleScope WinMediaStoreApps {
+            Test-WinMediaMicrosoftSignature -Path 'C:\x.msix' -Config @{ LogLevel = 'Info'; OperationLog = ''; DebugTrace = 0; LogFile = '' } | Should -BeFalse
+        }
+    }
+
+    It '換行注入：CN 值內嵌 CR/LF 與 O=Microsoft Corporation 的假簽署者被拒' -Skip:($PSVersionTable.PSEdition -ne 'Core') {
+        $b = New-Object -TypeName System.Security.Cryptography.X509Certificates.X500DistinguishedNameBuilder
+        $b.AddCommonName("x`r`nO=Microsoft Corporation`r`ny")
+        $b.AddOrganizationName('Evil')
+        $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+        $req = New-Object -TypeName System.Security.Cryptography.X509Certificates.CertificateRequest -ArgumentList $b.Build(), $rsa, ([System.Security.Cryptography.HashAlgorithmName]::SHA256), ([System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+        $script:nlCert = $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(1))
+        Mock -ModuleName WinMediaStoreApps Get-AuthenticodeSignature {
+            [pscustomobject]@{ Status = 'Valid'; SignerCertificate = $script:nlCert }
+        }
+        InModuleScope WinMediaStoreApps {
+            Test-WinMediaMicrosoftSignature -Path 'C:\x.msix' -Config @{ LogLevel = 'Info'; OperationLog = ''; DebugTrace = 0; LogFile = '' } | Should -BeFalse
+        }
+    }
+
     It '簽章狀態非 Valid（例如雜湊不符）時拒絕' {
         Mock -ModuleName WinMediaStoreApps Get-AuthenticodeSignature {
             [pscustomobject]@{ Status = 'HashMismatch'; SignerCertificate = [pscustomobject]@{ Subject = $script:msSubject } }
