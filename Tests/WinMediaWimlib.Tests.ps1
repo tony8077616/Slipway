@@ -66,13 +66,13 @@ Describe 'Resolve-WinMediaWimlib（手動指定與自動下載）' -Tag 'Unit' {
             $exe = Join-Path -Path $TestDrive -ChildPath 'auto\wimlib-imagex.exe'
             $config = @{ Wimlib = @{ Path = $exe }; WorkDir = $TestDrive }
             Mock Test-WinMediaFileHash { param([string]$Path) return ($Path -like '*downloads*') }
-            Mock Expand-Archive { param([string]$DestinationPath)
-                New-Item -ItemType File -Path (Join-Path -Path $DestinationPath -ChildPath 'wimlib-imagex.exe') -Force | Out-Null
+            Mock Expand-WinMediaWimlibZip { param([string]$DestinationDir)
+                New-Item -ItemType File -Path (Join-Path -Path $DestinationDir -ChildPath 'wimlib-imagex.exe') -Force | Out-Null
             }
 
             Resolve-WinMediaWimlib -Config $config | Should -Be $exe
             Should -Invoke Invoke-WebRequest -Times 1 -Exactly
-            Should -Invoke Expand-Archive -Times 1 -Exactly
+            Should -Invoke Expand-WinMediaWimlibZip -Times 1 -Exactly
             Test-Path -LiteralPath $exe -PathType Leaf | Should -BeTrue
         }
 
@@ -114,10 +114,24 @@ Describe 'Invoke-WinMediaWimlib（wimlib 專用入口）' -Tag 'Unit' {
 
 Describe 'Install-WinMediaAdk（自動安裝 Deployment Tools）' -Tag 'Unit' {
     InModuleScope WinMediaAdk {
+        BeforeAll {
+            function Get-TestSignerCert {
+                param([Parameter(Mandatory)][string]$Subject)
+                $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+                $req = New-Object -TypeName System.Security.Cryptography.X509Certificates.CertificateRequest -ArgumentList $Subject, $rsa, ([System.Security.Cryptography.HashAlgorithmName]::SHA256), ([System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+                return $req.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(1))
+            }
+            $script:msCert = Get-TestSignerCert -Subject 'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US'
+            $script:otherCert = Get-TestSignerCert -Subject 'CN=Someone Else, O=Other'
+        }
+
         BeforeEach {
             Mock Write-WinMediaLog { }
             Mock Invoke-WinMediaOperation { param([scriptblock]$ScriptBlock) & $ScriptBlock }
-            Mock Invoke-WebRequest { }
+            Mock Invoke-WebRequest {
+                New-Item -ItemType Directory -Path (Split-Path -Parent $OutFile) -Force | Out-Null
+                [System.IO.File]::WriteAllText($OutFile, 'stub-installer')
+            }
             Mock Remove-Item { }
         }
 
@@ -127,7 +141,7 @@ Describe 'Install-WinMediaAdk（自動安裝 Deployment Tools）' -Tag 'Unit' {
 
         It '簽章有效且為 Microsoft 時以 /quiet 安裝 DeploymentTools' {
             Mock Get-AuthenticodeSignature {
-                [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation' } }
+                [pscustomobject]@{ Status = 'Valid'; SignerCertificate = $script:msCert }
             }
             Mock Start-Process { [pscustomobject]@{ ExitCode = 0 } }
 
@@ -140,7 +154,7 @@ Describe 'Install-WinMediaAdk（自動安裝 Deployment Tools）' -Tag 'Unit' {
 
         It '非 Microsoft 簽章時中止' {
             Mock Get-AuthenticodeSignature {
-                [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Someone Else, O=Other' } }
+                [pscustomobject]@{ Status = 'Valid'; SignerCertificate = $script:otherCert }
             }
             Mock Start-Process { [pscustomobject]@{ ExitCode = 0 } }
 
@@ -150,7 +164,7 @@ Describe 'Install-WinMediaAdk（自動安裝 Deployment Tools）' -Tag 'Unit' {
 
         It '安裝程式結束碼非 0 或 3010 時中止' {
             Mock Get-AuthenticodeSignature {
-                [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Corporation, O=Microsoft Corporation' } }
+                [pscustomobject]@{ Status = 'Valid'; SignerCertificate = $script:msCert }
             }
             Mock Start-Process { [pscustomobject]@{ ExitCode = 1603 } }
 
