@@ -223,9 +223,10 @@ Describe 'Initialize-WinMediaWorkRoot 只接手本工具建立、已登記或為
         @{ Kind = 'unc-slash' }
     ) {
         param($Kind)
+        # Q: 不存在；用真實磁碟根目錄時，未修正版本會走到（已 mock 的）ACL 呼叫
         $root = switch ($Kind) {
-            'drive' { [System.IO.Path]::GetPathRoot($TestDrive) }
-            'drive-noslash' { [System.IO.Path]::GetPathRoot($TestDrive).TrimEnd('\') }
+            'drive' { 'Q:\' }
+            'drive-noslash' { 'Q:' }
             'unc' { '\\localhost\NoSuchShare$' }
             'unc-slash' { '\\localhost\NoSuchShare$\' }
         }
@@ -237,13 +238,34 @@ Describe 'Initialize-WinMediaWorkRoot 只接手本工具建立、已登記或為
         $root = Join-Path -Path $TestDrive -ChildPath 'wr-personal'
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         Set-Content -LiteralPath (Join-Path -Path $root -ChildPath 'photo.txt') -Value 'keep'
-        { Initialize-WinMediaWorkRoot -Path $root } | Should -Throw -ExpectedMessage '*工作目錄已存在且不是本工具建立*請手動刪除後重試*'
+        $err = $null
+        try { Initialize-WinMediaWorkRoot -Path $root } catch { $err = $_.Exception.Message }
+        $err | Should -BeLike '*工作目錄已存在且不是本工具建立*photo.txt*改用新的或空的 WorkDir，或把 OutputDir、MountDir 移出 WorkDir*'
+        $err | Should -Not -BeLike '*手動刪除*'
         Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
         Test-Path -LiteralPath (Join-Path -Path $root -ChildPath 'photo.txt') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path -Path $root -ChildPath '.winmedia-workroot') | Should -BeFalse
     }
 
-    It '有根目錄標記的既有目錄（含上次的內容）每次都重新套用 ACL' {
+    It '預先放入標記但根目錄 ACL 不是本工具設定的（未受保護）時當作未登記：有外來項目即拒絕' {
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-planted'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $root -ChildPath '.winmedia-workroot') -Value 'WinMediaRefresh' -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path -Path $root -ChildPath 'photo.txt') -Value 'keep'
+        (Get-Acl -LiteralPath $root).AreAccessRulesProtected | Should -BeFalse
+        { Initialize-WinMediaWorkRoot -Path $root } | Should -Throw -ExpectedMessage '*不是本工具建立*'
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
+    }
+
+    It '預先放入標記、ACL 不受信任，但其餘為空時接受並套用 ACL' {
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-planted-empty'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $root -ChildPath '.winmedia-workroot') -Value 'WinMediaRefresh' -Encoding ASCII
+        { Initialize-WinMediaWorkRoot -Path $root } | Should -Not -Throw
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 1 -Exactly
+    }
+
+    It '有根目錄標記且 ACL 受信任的既有目錄（含上次的內容）每次都重新套用 ACL' {
         $root = Join-Path -Path $TestDrive -ChildPath 'wr-registered'
         New-Item -ItemType Directory -Path (Join-Path -Path $root -ChildPath 'media') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path -Path $root -ChildPath '.winmedia-workroot') -Value 'WinMediaRefresh' -Encoding ASCII
@@ -287,6 +309,70 @@ Describe 'Initialize-WinMediaWorkRoot 只接手本工具建立、已登記或為
         Set-Content -LiteralPath (Join-Path -Path $root -ChildPath 'photo.txt') -Value 'keep'
         { Initialize-WinMediaWorkRoot -Path $root -IgnorePath @($logDir) } | Should -Throw -ExpectedMessage '*不是本工具建立*'
         Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
+    }
+
+    It '允許清單內的 <Name> 是 junction 時拒絕，不套用 ACL' -TestCases @(
+        @{ Name = 'logs' }
+        @{ Name = 'downloads' }
+    ) {
+        param($Name)
+        $root = Join-Path -Path $TestDrive -ChildPath "wr-junction-$Name"
+        $target = Join-Path -Path $TestDrive -ChildPath "wr-junction-target-$Name"
+        New-Item -ItemType Directory -Path $root, $target -Force | Out-Null
+        $link = Join-Path -Path $root -ChildPath $Name
+        New-Item -ItemType Junction -Path $link -Target $target | Out-Null
+        try {
+            { Initialize-WinMediaWorkRoot -Path $root -IgnorePath @((Join-Path -Path $root -ChildPath 'logs'), (Join-Path -Path $root -ChildPath 'downloads')) } | Should -Throw -ExpectedMessage '*不是本工具建立*'
+            Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
+        }
+        finally { if (Test-Path -LiteralPath $link) { [System.IO.Directory]::Delete($link) } }
+    }
+
+    It '允許清單內的頂層項目擁有者不在允許清單時拒絕（搶先建立的 downloads）' {
+        $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+        Mock -ModuleName WinMediaPath Get-WinMediaPathOwnerSid { if ($Path -like '*\downloads') { [System.Security.Principal.SecurityIdentifier]'S-1-5-21-1-2-3-1001' } else { $me } }
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-foreign-downloads'
+        $downloads = Join-Path -Path $root -ChildPath 'downloads'
+        New-Item -ItemType Directory -Path $downloads -Force | Out-Null
+        { Initialize-WinMediaWorkRoot -Path $root -IgnorePath @($downloads) } | Should -Throw -ExpectedMessage '*downloads*'
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
+    }
+
+    It '巢狀 LogDir（WorkDir\a\logs）以其頂層祖先 a 列入允許清單而接受' {
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-nested'
+        $logDir = Join-Path -Path $root -ChildPath 'a\logs'
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $logDir -ChildPath 'WinMediaRefresh.log') -Value 'x'
+        { Initialize-WinMediaWorkRoot -Path $root -IgnorePath @($logDir) } | Should -Not -Throw
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 1 -Exactly
+    }
+
+    It '非 NTFS 卷：有標記即信任（ACL 無法驗證），外來項目也接受，發出警告且不套 ACL' {
+        Mock -ModuleName WinMediaPath Get-WinMediaVolumeFileSystem { 'FAT32' }
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-fat-marker'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $root -ChildPath '.winmedia-workroot') -Value 'WinMediaRefresh' -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path -Path $root -ChildPath 'photo.txt') -Value 'x'
+        $warn = $null
+        { Initialize-WinMediaWorkRoot -Path $root -WarningVariable warn -WarningAction SilentlyContinue; $script:fatWarn = $warn } | Should -Not -Throw
+        @($script:fatWarn).Count | Should -BeGreaterThan 0
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
+    }
+
+    It '非 NTFS 卷第二次執行：頂層有 media.winmedia-owned 與 media\ 時接受' {
+        Mock -ModuleName WinMediaPath Get-WinMediaVolumeFileSystem { 'exFAT' }
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-fat-second'
+        Initialize-WinMediaWorkRoot -Path $root -WarningAction SilentlyContinue
+        Use-WinMediaWorkDir -Path (Join-Path -Path $root -ChildPath 'media')
+        { Initialize-WinMediaWorkRoot -Path $root -WarningAction SilentlyContinue } | Should -Not -Throw
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
+    }
+
+    It '檔案系統無法判斷（$null，例如 UNC）時照常套用 ACL 一次' {
+        Mock -ModuleName WinMediaPath Get-WinMediaVolumeFileSystem { $null }
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-unknown-fs'
+        Initialize-WinMediaWorkRoot -Path $root
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 1 -Exactly
     }
 
     It '非 NTFS／ReFS 卷略過 ACL 並發出警告，不中止' {
