@@ -104,6 +104,8 @@
 
     # 字串誤設為 ForceUnsigned 時在此中止，不靜默變成 $true（未簽章驅動會被注入）
     $forceUnsigned = Resolve-WinMediaForceUnsigned -Config $Config
+    # ResetBaseOS 同樣拒絕非布林；只作用於 install.wim 的 cleanup（WinRE 由 ResetBase 控制）
+    $resetBaseOS = Resolve-WinMediaResetBaseOS -Config $Config
 
     # 步驟 1：前置檢查
     $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -347,7 +349,7 @@
             # 文件步驟 14：cleanup；CBS_E_PENDING（0x800F0806）只警告，其他錯誤照常中止（Mount-WinMediaImage 失敗時會 Discard）
             try {
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Repair-WindowsImage -Path $mounted -StartComponentCleanup -LogLevel $Config.DismLogLevel | Out-Null
+                    Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:$resetBaseOS -LogLevel $Config.DismLogLevel | Out-Null
                 } | Out-Null
             }
             catch {
