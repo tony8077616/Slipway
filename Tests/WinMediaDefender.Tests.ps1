@@ -115,3 +115,77 @@ Describe 'Remove-WinMediaDefenderExclusion（失敗只警告）' -Tag 'Unit' {
         Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly
     }
 }
+
+Describe 'Defender 排除狀態檔（審查第 15 則：程序被強制結束後仍可還原）' -Tag 'Unit' {
+    AfterEach { $env:SLIPWAY_TEST_STATE = $null }
+
+    It 'Add 在 Add-MpPreference 之前寫入狀態檔，且只列出本次要新增的項目（不含使用者原有排除）' {
+        $stateFile = Join-Path -Path $TestDrive -ChildPath 'add-state.json'
+        $env:SLIPWAY_TEST_STATE = $stateFile
+        Mock -ModuleName WinMediaDefender Get-MpPreference { [pscustomobject]@{ ExclusionPath = @('D:\UserOwn') } }
+        Mock -ModuleName WinMediaDefender Add-MpPreference { if (-not (Test-Path -LiteralPath $env:SLIPWAY_TEST_STATE)) { throw '狀態檔尚未寫入' } }
+
+        $added = Add-WinMediaDefenderExclusion -Path @('d:\userown', 'D:\WinMediaWork') -StatePath $stateFile
+
+        $added | Should -Be @('D:\WinMediaWork')
+        @(Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json) | Should -Be @('D:\WinMediaWork')
+        Should -Invoke -CommandName Add-MpPreference -ModuleName WinMediaDefender -Times 1 -Exactly
+    }
+
+    It 'Restore 只移除狀態檔列出的項目，移除後刪除狀態檔，不碰使用者原有排除' {
+        $stateFile = Join-Path -Path $TestDrive -ChildPath 'restore-state.json'
+        Set-Content -LiteralPath $stateFile -Value (ConvertTo-Json -InputObject @('D:\WinMediaWork', 'D:\MountUUP'))
+        Mock -ModuleName WinMediaDefender Remove-MpPreference { }
+        Mock -ModuleName WinMediaDefender Get-MpPreference { [pscustomobject]@{ ExclusionPath = @('D:\UserOwn', 'D:\WinMediaWork', 'D:\MountUUP') } }
+
+        Restore-WinMediaDefenderExclusion -StatePath $stateFile -Confirm:$false
+
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 2 -Exactly
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly -ParameterFilter { $ExclusionPath -eq 'D:\UserOwn' }
+        Test-Path -LiteralPath $stateFile | Should -BeFalse
+    }
+
+    It '沒有狀態檔時 Restore 什麼都不做，不呼叫任何 Defender cmdlet' {
+        $stateFile = Join-Path -Path $TestDrive -ChildPath 'absent-state.json'
+        Mock -ModuleName WinMediaDefender Remove-MpPreference { }
+        Mock -ModuleName WinMediaDefender Get-MpPreference { }
+
+        Restore-WinMediaDefenderExclusion -StatePath $stateFile -Confirm:$false
+
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly
+        Should -Invoke -CommandName Get-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly
+    }
+
+    It '狀態檔損毀時警告並保留檔案，不移除任何排除' {
+        $stateFile = Join-Path -Path $TestDrive -ChildPath 'bad-state.json'
+        Set-Content -LiteralPath $stateFile -Value '{not json'
+        Mock -ModuleName WinMediaDefender Remove-MpPreference { }
+        Mock -ModuleName WinMediaDefender Write-Warning { }
+
+        { Restore-WinMediaDefenderExclusion -StatePath $stateFile -Confirm:$false } | Should -Not -Throw
+
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly
+        Should -Invoke -CommandName Write-Warning -ModuleName WinMediaDefender -Times 1 -Exactly
+        Test-Path -LiteralPath $stateFile | Should -BeTrue
+    }
+
+    It 'Remove 指定 StatePath 時，移除排除後刪除狀態檔' {
+        $stateFile = Join-Path -Path $TestDrive -ChildPath 'remove-state.json'
+        Set-Content -LiteralPath $stateFile -Value (ConvertTo-Json -InputObject @('D:\WinMediaWork'))
+        Mock -ModuleName WinMediaDefender Remove-MpPreference { }
+
+        Remove-WinMediaDefenderExclusion -Path @('D:\WinMediaWork') -StatePath $stateFile -Confirm:$false
+
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 1 -Exactly
+        Test-Path -LiteralPath $stateFile | Should -BeFalse
+    }
+
+    It '主流程在加入排除之前先呼叫 Restore-WinMediaDefenderExclusion（AST）' {
+        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
+        $restore = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Restore-WinMediaDefenderExclusion' }, $true))
+        $add = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Add-WinMediaDefenderExclusion' }, $true))
+        $restore.Count | Should -BeGreaterThan 0
+        $restore[0].Extent.StartOffset | Should -BeLessThan $add[0].Extent.StartOffset
+    }
+}
