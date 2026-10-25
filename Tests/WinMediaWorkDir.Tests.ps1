@@ -154,7 +154,7 @@ Describe 'Use-WinMediaWorkDir／Remove-WinMediaWorkDir 拒絕 reparse point（�
             { Use-WinMediaWorkDir -Path $link } | Should -Throw -ExpectedMessage '*reparse point*'
             Test-Path -LiteralPath $sentinelFile | Should -BeTrue
         }
-        finally { [System.IO.Directory]::Delete($link) }
+        finally { if (Test-Path -LiteralPath $link) { [System.IO.Directory]::Delete($link) } }
     }
 
     It '登記過的目錄內含 junction 子項目時拒絕清空，哨兵檔與其他子項目都保留' {
@@ -174,7 +174,7 @@ Describe 'Use-WinMediaWorkDir／Remove-WinMediaWorkDir 拒絕 reparse point（�
             Test-Path -LiteralPath $sentinelFile | Should -BeTrue
             Test-Path -LiteralPath $other | Should -BeTrue
         }
-        finally { [System.IO.Directory]::Delete($link) }
+        finally { if (Test-Path -LiteralPath $link) { [System.IO.Directory]::Delete($link) } }
     }
 
     It 'Remove-WinMediaWorkDir 遇到 junction 子項目同樣拒絕，哨兵檔仍在' {
@@ -191,7 +191,7 @@ Describe 'Use-WinMediaWorkDir／Remove-WinMediaWorkDir 拒絕 reparse point（�
             { Remove-WinMediaWorkDir -Path $dir -Confirm:$false } | Should -Throw -ExpectedMessage '*reparse point*'
             Test-Path -LiteralPath $sentinelFile | Should -BeTrue
         }
-        finally { [System.IO.Directory]::Delete($link) }
+        finally { if (Test-Path -LiteralPath $link) { [System.IO.Directory]::Delete($link) } }
     }
 }
 
@@ -247,7 +247,7 @@ Describe 'WorkDir ACL 與擁有者檢查（審查第 8 則）' -Tag 'Unit' {
             { Initialize-WinMediaWorkRoot -Path $link } | Should -Throw -ExpectedMessage '*reparse point*'
             Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
         }
-        finally { [System.IO.Directory]::Delete($link) }
+        finally { if (Test-Path -LiteralPath $link) { [System.IO.Directory]::Delete($link) } }
     }
 
     It '所有模組與主流程中，只有 Set-WinMediaWorkDirAcl 內部直接呼叫 Set-Acl（AST）' {
@@ -277,13 +277,16 @@ Describe 'WorkDir ACL 與擁有者檢查（審查第 8 則）' -Tag 'Unit' {
 }
 
 Describe 'Resolve-WinMediaDefenderStatePath（審查第 15 則）' -Tag 'Unit' {
-    It 'LogDir 不在 WorkDir 底下時，狀態檔放在 LogDir' {
-        $p = Resolve-WinMediaDefenderStatePath -LogDir 'D:\Logs' -WorkDir 'D:\Work'
-        $p | Should -BeExactly 'D:\Logs\DefenderExclusions.state.json'
+    It '狀態檔放在受 ACL 保護的 WorkDir 根目錄，檔名 defender-state.json' {
+        $p = Resolve-WinMediaDefenderStatePath -WorkDir 'D:\Work'
+        $p | Should -BeExactly 'D:\Work\defender-state.json'
     }
 
-    It 'LogDir 在 WorkDir 底下（預設設定）時，不可放進會被清空的 WorkDir，改放在 WorkDir 同層' {
-        $p = Resolve-WinMediaDefenderStatePath -LogDir 'D:\Work\logs' -WorkDir 'D:\Work'
-        $p | Should -BeExactly 'D:\Work.defender-state.json'
+    It '狀態檔不在預設 LogDir（WorkDir\logs，會被清）或任何登記清空的子目錄之下' {
+        $p = Resolve-WinMediaDefenderStatePath -WorkDir 'D:\Work\'
+        $p | Should -BeExactly 'D:\Work\defender-state.json'
+        foreach ($sub in 'logs', 'media', 'winre', 'expand', 'lxp', 'update-stage') {
+            $p.StartsWith("D:\Work\$sub\", [System.StringComparison]::OrdinalIgnoreCase) | Should -BeFalse
+        }
     }
 }

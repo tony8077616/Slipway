@@ -138,11 +138,38 @@ Describe 'Defender 排除狀態檔（審查第 15 則：程序被強制結束後
         Mock -ModuleName WinMediaDefender Remove-MpPreference { }
         Mock -ModuleName WinMediaDefender Get-MpPreference { [pscustomobject]@{ ExclusionPath = @('D:\UserOwn', 'D:\WinMediaWork', 'D:\MountUUP') } }
 
-        Restore-WinMediaDefenderExclusion -StatePath $stateFile -Confirm:$false
+        Restore-WinMediaDefenderExclusion -StatePath $stateFile -AllowedPath @('D:\WinMediaWork', 'D:\MountUUP', 'D:\WinMediaOut') -Confirm:$false
 
         Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 2 -Exactly
         Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly -ParameterFilter { $ExclusionPath -eq 'D:\UserOwn' }
         Test-Path -LiteralPath $stateFile | Should -BeFalse
+    }
+
+    It 'Restore 不移除狀態檔列出、但不是本次 WorkDir／MountDir／OutputDir 的路徑' {
+        $stateFile = Join-Path -Path $TestDrive -ChildPath 'foreign-state.json'
+        Set-Content -LiteralPath $stateFile -Value (ConvertTo-Json -InputObject @('C:\Windows', 'D:\WinMediaWork\'))
+        Mock -ModuleName WinMediaDefender Remove-MpPreference { }
+        Mock -ModuleName WinMediaDefender Write-Warning { }
+
+        Restore-WinMediaDefenderExclusion -StatePath $stateFile -AllowedPath @('D:\WinMediaWork', 'D:\MountUUP', 'D:\WinMediaOut') -Confirm:$false
+
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 1 -Exactly
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly -ParameterFilter { $ExclusionPath -eq 'C:\Windows' }
+        Test-Path -LiteralPath $stateFile | Should -BeFalse
+    }
+
+    It 'Add 時上次的狀態檔仍在（尚未還原），警告並不新增任何排除，狀態檔保留' {
+        $stateFile = Join-Path -Path $TestDrive -ChildPath 'pending-state.json'
+        Set-Content -LiteralPath $stateFile -Value (ConvertTo-Json -InputObject @('D:\WinMediaWork'))
+        Mock -ModuleName WinMediaDefender Get-MpPreference { [pscustomobject]@{ ExclusionPath = @('D:\WinMediaWork') } }
+        Mock -ModuleName WinMediaDefender Add-MpPreference { }
+        Mock -ModuleName WinMediaDefender Write-Warning { }
+
+        $added = Add-WinMediaDefenderExclusion -Path @('D:\WinMediaWork', 'D:\MountUUP') -StatePath $stateFile
+
+        @($added).Count | Should -Be 0
+        Should -Invoke -CommandName Add-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly
+        @(Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json) | Should -Be @('D:\WinMediaWork')
     }
 
     It '沒有狀態檔時 Restore 什麼都不做，不呼叫任何 Defender cmdlet' {
@@ -150,7 +177,7 @@ Describe 'Defender 排除狀態檔（審查第 15 則：程序被強制結束後
         Mock -ModuleName WinMediaDefender Remove-MpPreference { }
         Mock -ModuleName WinMediaDefender Get-MpPreference { }
 
-        Restore-WinMediaDefenderExclusion -StatePath $stateFile -Confirm:$false
+        Restore-WinMediaDefenderExclusion -StatePath $stateFile -AllowedPath @('D:\WinMediaWork') -Confirm:$false
 
         Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly
         Should -Invoke -CommandName Get-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly
