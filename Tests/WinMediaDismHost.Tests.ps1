@@ -68,6 +68,7 @@ Describe 'Invoke-WinMediaDism：pwsh 7 的先檢查、再匯入' -Tag 'Unit' {
 
     It 'Windows PowerShell 5.1 不呼叫相容匯入' {
         Mock -ModuleName WinMediaDism Test-WinMediaDismCore { $false }
+        Mock -ModuleName WinMediaDism Get-Module { } -ParameterFilter { $Name -eq 'Dism' }
         Invoke-WinMediaDism -Provider 'Inbox' -ScriptBlock { 'ok' } -Config $script:cfg | Should -Be 'ok'
         Should -Invoke -ModuleName WinMediaDism Import-WinMediaDismCompat -Times 0 -Exactly
     }
