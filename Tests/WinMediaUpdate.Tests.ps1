@@ -99,6 +99,7 @@ Describe 'Save-WinMediaUpdate（Catalog 優先、UUP 輔助與驗證）' -Tag 'U
         $script:config = @{ PackageDir = (Join-Path -Path $TestDrive -ChildPath ('pkg-' + [guid]::NewGuid().ToString('N'))); Download = @{ Method = 'WebRequest' }; LogLevel = 'Info' }
         Mock -ModuleName WinMediaUpdate Write-WinMediaLog { }
         Mock -ModuleName WinMediaUpdate Remove-Item { }
+        Mock -ModuleName WinMediaUpdate Test-WinMediaMicrosoftSignature { $true }
         Mock -ModuleName WinMediaUpdate Invoke-WinMediaDownload { }
         Mock -ModuleName WinMediaUpdate Get-WinMediaCatalogFile {
             @([pscustomobject]@{ FileName = $script:catalogFileName; Uri = 'https://catalog.sf.dl.delivery.mp.microsoft.com/a.msu'; Sha1 = $script:sha1 })
@@ -193,5 +194,38 @@ Describe 'Save-WinMediaUpdate（Catalog 優先、UUP 輔助與驗證）' -Tag 'U
 
     It 'PackageDir 未設定時中止' {
         { Save-WinMediaUpdate -KB 'KB5044284' -Config @{ PackageDir = ''; Download = @{ Method = 'WebRequest' } } } | Should -Throw '*PackageDir*'
+    }
+}
+
+Describe 'Save-WinMediaUpdateFile Authenticode 驗證（UUP 網址與雜湊同源，信任邊界）' -Tag 'Unit' {
+    # 未簽章但 SHA-1 正確的假檔案；簽章檢查走真實的 Test-WinMediaMicrosoftSignature
+    It '下載完成後簽章無效：刪除檔案並拋出簽章錯誤' {
+        InModuleScope WinMediaUpdate -Parameters @{ Dest = $TestDrive } {
+            param($Dest)
+            $cfg = @{ LogLevel = 'Info'; OperationLog = ''; DebugTrace = 0; Download = @{ Method = 'WebRequest' } }
+            $bytes = [Text.Encoding]::ASCII.GetBytes('not a signed msu')
+            $sha1 = [BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash($bytes)).Replace('-', '')
+            Mock Write-WinMediaLog { }
+            Mock Invoke-WinMediaDownload { [IO.File]::WriteAllBytes($Destination, [Text.Encoding]::ASCII.GetBytes('not a signed msu')) }
+            { Save-WinMediaUpdateFile -Uri 'https://download.windowsupdate.com/x.msu' -FileName 'x.msu' -Sha1 $sha1 -Destination $Dest -Method WebRequest -Config $cfg } | Should -Throw '*簽章*'
+            Should -Invoke -CommandName Invoke-WinMediaDownload -Times 1 -Exactly
+            Test-Path -LiteralPath (Join-Path -Path $Dest -ChildPath 'x.msu') | Should -BeFalse
+        }
+    }
+
+    It '快取命中但簽章無效：拋出簽章錯誤且不刪除檔案，也不下載' {
+        InModuleScope WinMediaUpdate -Parameters @{ Dest = $TestDrive } {
+            param($Dest)
+            $cfg = @{ LogLevel = 'Info'; OperationLog = ''; DebugTrace = 0; Download = @{ Method = 'WebRequest' } }
+            $bytes = [Text.Encoding]::ASCII.GetBytes('user supplied unsigned cab')
+            $sha1 = [BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash($bytes)).Replace('-', '')
+            $cached = Join-Path -Path $Dest -ChildPath 'y.cab'
+            [IO.File]::WriteAllBytes($cached, $bytes)
+            Mock Write-WinMediaLog { }
+            Mock Invoke-WinMediaDownload { }
+            { Save-WinMediaUpdateFile -Uri 'https://download.windowsupdate.com/y.cab' -FileName 'y.cab' -Sha1 $sha1 -Destination $Dest -Method WebRequest -Config $cfg } | Should -Throw '*簽章*'
+            Should -Invoke -CommandName Invoke-WinMediaDownload -Times 0 -Exactly
+            Test-Path -LiteralPath $cached | Should -BeTrue
+        }
     }
 }
