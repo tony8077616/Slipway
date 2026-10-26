@@ -241,6 +241,11 @@ function Initialize-WinMediaWorkRoot {
     # 未知（UNC 等）照常套用；FAT／exFAT 沒有 ACL，擁有者也無意義
     $aclSupported = -not $fileSystem -or @('NTFS', 'ReFS') -contains $fileSystem
     $marker = Join-Path -Path $Path -ChildPath '.winmedia-workroot'
+    # CreateNew：同名檔案（含檢查後才出現的硬連結）已存在就拋錯，不寫穿到連結目標
+    $writeMarker = {
+        $stream = [System.IO.File]::Open($full + '\.winmedia-workroot', [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write)
+        try { $bytes = [System.Text.Encoding]::ASCII.GetBytes('WinMediaRefresh'); $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+    }
     if (Test-Path -LiteralPath $Path) {
         if ((Get-Item -LiteralPath $Path -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
             throw "WorkDir 是 reparse point（junction 或符號連結），拒絕使用：$Path（請改用一般資料夾）。"
@@ -249,15 +254,15 @@ function Initialize-WinMediaWorkRoot {
         if ($aclSupported) {
             $owner = Get-WinMediaPathOwnerSid -Path $Path
             if ($ownerAllowed -notcontains $owner.Value) {
-                throw "WorkDir 已存在，但擁有者 $($owner.Value) 不是 Administrators、SYSTEM 或目前使用者，拒絕使用：$Path（請先刪除該目錄後重試）。"
+                throw "WorkDir 已存在，但擁有者 $($owner.Value) 不是 Administrators、SYSTEM 或目前使用者，拒絕使用：$Path（請改用新的或空的 WorkDir）。"
             }
         }
         # origin/main 從不寫標記，所以標記只在根目錄 ACL 仍是本工具設定的狀態時可信；非 NTFS 卷無 ACL 可驗證，有標記即信任
         $trusted = (Test-Path -LiteralPath $marker -PathType Leaf) -and (-not $aclSupported -or (Test-WinMediaWorkRootAclTrusted -Path $Path))
         if (-not $trusted) {
-            # 允許清單：標記本身，以及 IgnorePath 各自在 WorkDir 底下的頂層祖先（WorkDir\a\logs → WorkDir\a）
+            # 允許清單：IgnorePath 各自在 WorkDir 底下的頂層祖先（WorkDir\a\logs → WorkDir\a）；不可信的標記不在其中，視為外來項目（可能是硬連結）
             $prefix = $full + '\'
-            $allowed = @($prefix + '.winmedia-workroot')
+            $allowed = @()
             foreach ($p in @($IgnorePath | Where-Object { $_ })) {
                 $f = [System.IO.Path]::GetFullPath($p).TrimEnd('\')
                 if ($f.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { $allowed += $prefix + $f.Substring($prefix.Length).Split('\')[0] }
@@ -271,12 +276,12 @@ function Initialize-WinMediaWorkRoot {
                 $shown = (@($blocking | Select-Object -First 5) -join '、') + $(if ($blocking.Count -gt 5) { ' 等' } else { '' })
                 throw "工作目錄已存在且不是本工具建立：$Path；擋住執行的項目：$shown（請改用新的或空的 WorkDir，或把 OutputDir、MountDir 移出 WorkDir）。"
             }
-            Set-Content -LiteralPath $marker -Value 'WinMediaRefresh' -Encoding ASCII
+            & $writeMarker
         }
     }
     else {
         New-Item -ItemType Directory -Path $Path -Force | Out-Null
-        Set-Content -LiteralPath $marker -Value 'WinMediaRefresh' -Encoding ASCII
+        & $writeMarker
     }
     if (-not $aclSupported) {
         Write-Warning "WorkDir 所在磁碟區為 $fileSystem，不支援 ACL，略過權限設定：$Path（WorkDir 與 defender-state.json 不受 ACL 保護）。"

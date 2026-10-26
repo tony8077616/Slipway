@@ -444,12 +444,12 @@ Describe 'WorkDir ACL 與擁有者檢查（審查第 8 則）' -Tag 'Unit' {
         Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 1 -Exactly -ParameterFilter { $Security.AreAccessRulesProtected }
     }
 
-    It '既有目錄的擁有者不在允許清單時拒絕，訊息說明先刪除該目錄，且不套用 ACL' {
+    It '既有目錄的擁有者不在允許清單時拒絕，訊息建議改用新的或空的 WorkDir，且不套用 ACL' {
         Mock -ModuleName WinMediaPath Set-WinMediaWorkDirAcl { }
         Mock -ModuleName WinMediaPath Get-WinMediaPathOwnerSid { [System.Security.Principal.SecurityIdentifier]'S-1-5-21-1-2-3-1001' }
         $root = Join-Path -Path $TestDrive -ChildPath 'work-foreign'
         New-Item -ItemType Directory -Path $root -Force | Out-Null
-        { Initialize-WinMediaWorkRoot -Path $root } | Should -Throw -ExpectedMessage '*擁有者*請先刪除*'
+        { Initialize-WinMediaWorkRoot -Path $root } | Should -Throw -ExpectedMessage '*擁有者*請改用新的或空的 WorkDir*'
         Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
     }
 
