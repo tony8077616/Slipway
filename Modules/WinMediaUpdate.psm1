@@ -477,4 +477,16 @@ function Save-WinMediaBuildSet {
     }
 }
 
-Export-ModuleMember -Function Save-WinMediaUpdate, Save-WinMediaBuildSet, Resolve-WinMediaCumulativeSet, New-WinMediaUpdateStage, Find-WinMediaLearnKb
+function Resolve-WinMediaResetBaseOS {
+    # 字串（例如 'false'）經 [bool] 轉型會變成 $true，改為直接拒絕；缺鍵視為 $false
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][hashtable]$Config)
+
+    if (-not $Config.ContainsKey('ResetBaseOS')) { return $false }
+    $value = $Config.ResetBaseOS
+    if ($value -isnot [bool]) { throw "ResetBaseOS 必須是 `$true 或 `$false（布林），目前為：'$value'。" }
+    return $value
+}
+
+Export-ModuleMember -Function Resolve-WinMediaResetBaseOS, Save-WinMediaUpdate, Save-WinMediaBuildSet, Resolve-WinMediaCumulativeSet, New-WinMediaUpdateStage, Find-WinMediaLearnKb

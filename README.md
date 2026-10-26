@@ -10,7 +10,7 @@
 
 ## 特性
 
-- **手動更新包**：不連網、不自動下載；依 `update.mum` 與 manifest 分類，不只看檔名。
+- **更新包放置在 `PackageDir`**：更新包預設由使用者手動放入，依 `update.mum` 與 manifest 分類，不只看檔名。設定 `Download.Build`（UUP）或 `Download.KB`（Catalog）時會連網下載更新包；wimlib 與 ADK 缺少時也會自動下載（見下節）。其餘情況不連網。FoD、語言包、StoreApps 不自動下載。
 - **DISM 只用 Cmdlet**：一律呼叫 DISM PowerShell 模組，不直接執行 `dism.exe`。
 - **DISM 來源可切換**：`Config.DismProvider` 可設為 `Inbox`（預設）或 `ADK`。
 - **ESD 與 WIM 輸出**：`Config.OutputFormat` 可選 `WIM` 或 `ESD`；產生 ESD 一律使用 wimlib。
@@ -44,6 +44,7 @@
     3. 子模組內附路徑 `PSModules\Imaging\tools\wimlib\<檔名>`，SHA-256 相符才使用；不符則略過，改走下一步；
     4. 下載，SHA-256 不符即刪除並中止。
   - 設定 `Wimlib.Path` 指向既有的 `wimlib-imagex.exe` 時，檔案存在即直接使用，不做 SHA-256 校驗。
+  - **行為改變（Keel #7）**：`Wimlib.Path` 指向的檔案不存在、需要下載解壓時，若解壓目錄（`Wimlib.Path` 所在目錄）是非預設路徑（使用者自行指定）且非空，一律拒絕（不清空、不覆寫），請改指空目錄或移除既有檔案。預設路徑（`%LOCALAPPDATA%\WinMediaRefresh\tools\wimlib-1.14.5`）仍會清空後解壓。
 - `oscdimg.exe` 與 ADK 的 DISM 不包含於本 repo，缺少時由模組自動安裝 ADK Deployment Tools（需系統管理員權限）。
 
 ### WorkDir 權限與 Defender 排除
@@ -99,9 +100,18 @@
 | `AdkRoot` | ADK 預設安裝路徑 | `DismProvider = 'ADK'` 或需要 oscdimg 時使用；缺少時自動安裝 Deployment Tools |
 | `DismProvider` | `Inbox` | `Inbox` 或 `ADK` |
 | `OutputFormat` | `WIM` | `WIM` 或 `ESD` |
-| `WinPEUpdate` | `SafeOS` | WinPE 核心更新路線：`SafeOS`（套用 SafeOS DU，已驗證）或 `Lcu`（convert-UUP 路線：WinRE 套 SSU＋SafeOS DU，boot.wim 再套最新 LCU；尚未 e2e 驗證） |
+| `WinPEUpdate` | `SafeOS` | WinPE 核心更新路線：`SafeOS`（套用 SafeOS DU，已驗證）或 `Lcu`（convert-UUP 路線：WinRE 套 SSU＋SafeOS DU，boot.wim 另以原始 MSU 加入最新 LCU；e2e 實測 KB5127648 判定 Not applicable，無效果，不建議使用） |
 | `UpdateBootFiles` | `$true` | 選項 B：改用安裝映像內已套用 LCU 的 `_EX` 開機檔（bootx64、bootmgr、efisys、memtest、boot.stl、fonts、cipolicies）。**風險**：這些是 UEFI CA 2023 開機檔，韌體 db 沒有 2023 CA 的機器開啟 Secure Boot 可能無法開機 |
-| `ResetBase` | `$false` | 啟用後無法解除安裝更新 |
+| `ResetBase` | `$false` | 只作用於 WinRE 的 cleanup；啟用後無法解除安裝更新 |
+| `ResetBaseOS` | `$false` | 作用於 install.wim 各目標索引的 cleanup（`-ResetBase`）；啟用後無法解除安裝更新。必須是布林，字串（例如 `'false'`）會中止。boot.wim 不受影響 |
+| `Languages` | `@('ja-JP')` | 要保留的語言（語言包與 FoD 依此過濾） |
+| `Indexes` | `@()` | 要更新的 install.wim 索引；空陣列 = 全部 |
+| `VirtualEditions` | `@()` | 要建立的虛擬版本（例如 `@('IoTEnterpriseS')`）；建立時來源為 EnterpriseS 索引 |
+| `DeleteSourceEdition` | `$false` | 建立虛擬版本後是否刪除 EnterpriseS |
+| `DefenderExclusions` | `$false` | 執行期間把 WorkDir、MountDir、OutputDir 加入 Windows Defender 排除，結束時只還原本次新增的項目；需系統管理員權限 |
+| `Lang.Path` | 空白 | 語言包資料夾（遞迴，只取 `.cab`）；空白 = 執行腳本所在目錄\`Lang`（不存在則停用） |
+| `Fod.Path` | 空白 | FoD 資料夾（遞迴，只取 `.cab`）；空白 = 執行腳本所在目錄\`Fod`（不存在則停用） |
+| `StoreApps.Path` | 空白 | StoreApps 資料夾；空白 = 執行腳本所在目錄\`StoreApps`（不存在則停用），每個套件須通過 Microsoft 簽章驗證 |
 | `Drivers.Path` | 空白 | 驅動資料夾（含 `ALL`、`WinPE`、`OS` 子資料夾）；空白 = 執行腳本所在目錄\`Drivers`（不存在則停用） |
 | `Drivers.ForceUnsigned` | `$false` | 是否注入未簽章驅動（有風險，開啟時寫入 Warning） |
 | `Lxp.Path` | 空白 | LXP 資料夾（遞迴偵測）；空白 = 執行腳本所在目錄\`Lxp`（不存在則停用），只加入 install.wim |
@@ -112,6 +122,8 @@
 | `Download.KB` | 空白 | 只指定 KB（例如 `KB5127648`）時改用 Catalog；`Download.Build` 與本項同時有值時以 Build 為準。空白 = 不下載 |
 
 自訂設定檔需包含 `Drivers`、`Lxp`、`Apps` 三區塊（模組以 `Set-StrictMode 2.0` 執行）。
+
+`Config\Default.psd1` 的 `PowerShellVersion = '5.1'` 只是註記，程式不會讀取；實際的版本限制在 `WinMediaRefresh.psd1` 的 `PowerShellVersion`（5.1）。
 
 ### 自訂內容
 
@@ -145,6 +157,7 @@ Appx 移除與 LXP 加入只作用於 install.wim；執行順序為 LCU → Appx
 - `Export-WinMediaEsd`：輸出 ESD
 - `Add-WinMediaVirtualEdition`：加入虛擬版本
 - `Get-WinMediaPackageCategory`：分類更新包
+- `Save-WinMediaUpdate`：下載更新包到 `PackageDir`（Catalog 優先、UUP 輔助與驗證）
 
 ## 目錄結構
 
@@ -156,17 +169,7 @@ WinMediaRefresh/
 ├── Config/Default.psd1           預設設定
 ├── Public/                       公開函式
 ├── Modules/                      專案功能模組（路徑規則、驅動、LXP、Appx、更新包分類）
-├── Tests/WinMediaRefresh.Tests.ps1   Pester 測試（既有功能）
-├── Tests/WinMediaWimlib.Tests.ps1    Pester 測試（wimlib／ADK 取得與分流）
-├── Tests/WinMediaDriver.Tests.ps1    Pester 測試（路徑重疊、驅動三種狀態、注入位置）
-├── Tests/WinMediaAddons.Tests.ps1    Pester 測試（LXP、CustomAppsList、Appx 移除、步驟順序）
-├── Tests/PathSanitize.Tests.ps1      Pester 測試（路徑、登錄機碼、網址淨化）
-├── Tests/WinMediaInputPath.Tests.ps1 Pester 測試（輸入資料夾預設值）
-├── Tests/WinMediaRedirect.Tests.ps1  Pester 測試（共用下載器的重導向逐跳驗證）
-├── Tests/WinMediaMountPoint.Tests.ps1   Pester 測試（掛載點目錄由建立者於成功、失敗後清除）
-├── Tests/WinMediaPackageWim.Tests.ps1   Pester 測試（WIM 格式 .msu 以 wimlib 展開、檔頭判斷）
-├── Tests/WinMediaRootImports.Tests.ps1  Pester 測試（根模組可解析 PathSanitize 函式）
-├── Tests/WinMediaSetupDu.Tests.ps1      Pester 測試（Setup DU 內容辨識、SafeOS 反向測試、文件第 26–28 列順序）
+├── Tests/*.Tests.ps1             Pester 測試（依功能分檔，數量以實際為準）
 ├── Tests/Invoke-Validation.ps1       驗證入口：Pester 6.2.0 + PSScriptAnalyzer
 ├── README.md
 └── DESIGN.md
@@ -184,7 +187,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Invoke-Validatio
 
 ## 目前狀態
 
-- Pester：238 個單元測試通過（18 個測試檔，Windows PowerShell 5.1、Pester 6.2.0）。
+- Pester：以 `Tests\Invoke-Validation.ps1` 的輸出為準（Windows PowerShell 5.1、Pester 6.2.0）；測試數量與檔案數不寫在此處。
 - PSScriptAnalyzer（Error／Warning）：0 筆。
 - 所有 `.ps1`／`.psm1`／`.psd1` 為 CRLF 行尾與 UTF-8 BOM。
 - **尚未驗證**：LXP 的 `License.xml` 位置、真實映像中 `Get-AppxProvisionedPackage` 的 PFN 對應（見 `DESIGN.md` 變更歷史 2026-10-15）。
