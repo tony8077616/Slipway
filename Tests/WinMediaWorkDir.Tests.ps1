@@ -257,12 +257,23 @@ Describe 'Initialize-WinMediaWorkRoot 只接手本工具建立、已登記或為
         Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
     }
 
-    It '預先放入標記、ACL 不受信任，但其餘為空時接受並套用 ACL' {
+    It '預先放入標記、ACL 不受信任，即使其餘為空也拒絕（不可信的標記是外來項目）' {
         $root = Join-Path -Path $TestDrive -ChildPath 'wr-planted-empty'
         New-Item -ItemType Directory -Path $root -Force | Out-Null
         Set-Content -LiteralPath (Join-Path -Path $root -ChildPath '.winmedia-workroot') -Value 'WinMediaRefresh' -Encoding ASCII
-        { Initialize-WinMediaWorkRoot -Path $root } | Should -Not -Throw
-        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 1 -Exactly
+        { Initialize-WinMediaWorkRoot -Path $root } | Should -Throw -ExpectedMessage '*不是本工具建立*.winmedia-workroot*'
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
+    }
+
+    It '標記是指向外部受害檔案的硬連結時拒絕，不寫穿、不套用 ACL' {
+        $root = Join-Path -Path $TestDrive -ChildPath 'wr-hardlink'
+        New-Item -ItemType Directory -Path $root -Force | Out-Null
+        $victim = Join-Path -Path $TestDrive -ChildPath 'victim.txt'
+        Set-Content -LiteralPath $victim -Value 'original' -Encoding ASCII
+        New-Item -ItemType HardLink -Path (Join-Path -Path $root -ChildPath '.winmedia-workroot') -Target $victim | Out-Null
+        { Initialize-WinMediaWorkRoot -Path $root } | Should -Throw -ExpectedMessage '*不是本工具建立*'
+        Should -Invoke -CommandName Set-WinMediaWorkDirAcl -ModuleName WinMediaPath -Times 0 -Exactly
+        (Get-Content -LiteralPath $victim -Raw).Trim() | Should -BeExactly 'original'
     }
 
     It 'Test-WinMediaWorkRootAclTrusted：只有受保護且 ACE 僅 SYSTEM／Administrators 時為 True' {
