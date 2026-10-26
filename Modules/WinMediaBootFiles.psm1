@@ -24,6 +24,7 @@ function Copy-WinMediaBootFile {
 }
 
 function Copy-WinMediaUpdatedBootFiles {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'BootFiles 是一組開機檔（_EX 開機檔）的領域用語；函式已匯出並被 Public 與測試以此名稱引用，改名會牽動匯出清單與呼叫端。')]
     # 選項 UpdateBootFiles（對應 convert-UUP 的 UpdtBootFiles=1，3903–3930 行）
     # 來源是已套用 LCU 的安裝映像。回傳 $true 表示已使用 *_EX 開機檔；呼叫端據此跳過步驟 9 的 WinPE 開機管理員覆寫
     [CmdletBinding()]
@@ -136,6 +137,7 @@ function Compress-WinMediaBootWim {
 }
 
 function Copy-WinMediaSetupDuFiles {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'SetupDuFiles 是 Setup DU 檔案集合的領域用語；函式已匯出並被 Public 與測試以此名稱引用，改名會牽動匯出清單與呼叫端。')]
     # 對應 convert-UUP 2349–2358 行：根目錄檔案 xcopy /U，只覆蓋媒體上既有的檔；*.ini 不限既有檔
     # 不套用 /D（比較時間戳）：實測 SetupPlatform 輸入為 9443、DU 為 9685，但 DU 的時間（09-10）早於輸入（09-13），參考採用的是 DU 版本
     # 語言子資料夾（名稱含 -）只在媒體已有該語言的 *.mui 時整個複製；replacementmanifests 遞迴複製；其餘子資料夾忽略
@@ -182,6 +184,7 @@ function Get-WinMediaListEntry {
 }
 
 function Copy-WinMediaBootWimSources {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'BootWimSources 是 convert-UUP 的領域用語（bootwim.txt 所列的一組來源檔）；函式已匯出並被 Public 與多個測試以此名稱引用，改名會牽動匯出清單與呼叫端。')]
     # 對應 convert-UUP bin\boot-wim.txt（約 1130–1145 行）：媒體 sources\ 內列在 bootwim.txt 的檔案覆蓋 WinPE 索引 2 的同名檔（媒體 → WinPE）
     # bootmui.txt 的語言 mui 依語言資料夾（小寫）處理；媒體沒有的檔案略過（convert-UUP 的 if exist）
     # 另加入媒體根目錄 setup.exe 與 sources\inf\setup.cfg（convert-UUP 同一份清單的 add 行）
@@ -279,6 +282,7 @@ function Get-WinMediaEffectiveLanguage {
 }
 
 function Remove-WinMediaExtraLanguage {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = '唯一呼叫點 Public\Invoke-WindowsMediaRefresh.ps1:178 位於 :51 的 ShouldProcess 之後，-WhatIf 時已於 :52 return，不會執行到此函式。')]
     # 媒體複製後移除不在保留集合（Get-WinMediaEffectiveLanguage）內的語言資料夾，使媒體與 WinPE 的語言一致；只刪含 .mui 的語言資料夾
     [CmdletBinding()]
     param(

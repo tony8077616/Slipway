@@ -73,6 +73,7 @@ function Add-WinMediaDefenderExclusion {
 }
 
 function Remove-WinMediaDefenderExclusion {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = '唯一呼叫點 Public\Invoke-WindowsMediaRefresh.ps1:500（finally）；-WhatIf 時 :51 的 ShouldProcess 已於 :52 return，早於 Add 的 :93 與 try 的 :95，故不會新增也不會移除排除。')]
     <#
     .SYNOPSIS
         移除先前由 Add-WinMediaDefenderExclusion 新增的路徑排除；失敗只警告，供 finally 呼叫。

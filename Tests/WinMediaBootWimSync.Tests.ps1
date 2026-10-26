@@ -1,4 +1,7 @@
 ﻿#Requires -Version 5.1
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = '測試以 global 變數在 Mock 與 InModuleScope 之間傳遞呼叫紀錄，改為 $script: 會改變 Mock 的 scope，測試可能讀不到記錄卻照樣通過')]
+[CmdletBinding()]
+param()
 
 BeforeAll {
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaBootFiles.psm1') -Force
