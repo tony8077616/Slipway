@@ -110,11 +110,9 @@
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         throw '需要系統管理員權限。'
     }
-    # Defender 排除（選項 DefenderExclusions）：開工前加入工作目錄，finally 只還原本次新增的項目
+    # Defender 排除（選項 DefenderExclusions）：WorkDir 建立並套用 ACL 後才加入（狀態檔放 WorkDir 根目錄），finally 只還原本次新增的項目
     $defenderAdded = @()
-    if ($Config.ContainsKey('DefenderExclusions') -and $Config.DefenderExclusions) {
-        $defenderAdded = Add-WinMediaDefenderExclusion -Path @($Config.WorkDir, $Config.MountDir, $Config.OutputDir)
-    }
+    $defenderState = $null
     try {
     $oneDrive = [string]$env:OneDrive
     if ($oneDrive) {
@@ -171,7 +169,16 @@
         throw "掛載目錄已存在且非空：$mountDir（請指定空目錄或刪除後重試）。"
     }
     $mountDirCreated = -not (Test-Path -LiteralPath $mountDir)
-    foreach ($dir in @($workDir, $mountDir, $Config.LogDir, $Config.OutputDir)) {
+    # 審查第 8 則：WorkDir 根目錄（預設在磁碟根目錄下）擁有者不合格或為 junction 時中止；每次都重新套用關閉繼承的 ACL
+    # 此前 Write-WinMediaLog（LogDir）與 Resolve-WinMediaWimlib／Install-WinMediaAdk（WorkDir\downloads）可能已寫入，判斷是否為空時排除
+    Initialize-WinMediaWorkRoot -Path $workDir -IgnorePath @($Config.LogDir, $Config.LogFile, $Config.OperationLog, (Join-Path -Path $workDir -ChildPath 'downloads'))
+    # 審查第 15 則：上次被強制結束而遺留的排除，不論本次是否開啟 DefenderExclusions 都先還原
+    $defenderState = Resolve-WinMediaDefenderStatePath -WorkDir $workDir
+    Restore-WinMediaDefenderExclusion -StatePath $defenderState -AllowedPath @($workDir, $mountDir, $Config.OutputDir) -Confirm:$false
+    if ($Config.ContainsKey('DefenderExclusions') -and $Config.DefenderExclusions) {
+        $defenderAdded = Add-WinMediaDefenderExclusion -Path @($workDir, $mountDir, $Config.OutputDir) -StatePath $defenderState
+    }
+    foreach ($dir in @($mountDir, $Config.LogDir, $Config.OutputDir)) {
         if (-not (Test-Path -LiteralPath $dir)) {
             Invoke-WinMediaOperation -Category File -Operation 'CreateDirectory' -Target $dir -Config $Config -ScriptBlock {
                 New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -559,6 +566,7 @@
     return $output
     }
     finally {
-        Remove-WinMediaDefenderExclusion -Path $defenderAdded -Confirm:$false
+        # 沒有新增任何排除時不碰狀態檔（可能是上次未還原成功而保留的）
+        if (@($defenderAdded).Count -gt 0) { Remove-WinMediaDefenderExclusion -Path $defenderAdded -StatePath $defenderState -Confirm:$false }
     }
 }

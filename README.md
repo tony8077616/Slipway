@@ -46,6 +46,25 @@
   - 設定 `Wimlib.Path` 指向既有的 `wimlib-imagex.exe` 時，檔案存在即直接使用，不做 SHA-256 校驗。
 - `oscdimg.exe` 與 ADK 的 DISM 不包含於本 repo，缺少時由模組自動安裝 ADK Deployment Tools（需系統管理員權限）。
 
+### WorkDir 權限與 Defender 排除
+
+- WorkDir 根目錄的 ACL 會改成關閉繼承，只有 SYSTEM 與 Administrators 完全控制。只有下列三種 WorkDir 會套用：
+  1. 本次新建的目錄；
+  2. 既存但為空的目錄（本次在檢查前寫入的 `logs`、`downloads` 這類允許項目不算內容）；
+  3. 有可信標記的目錄：根目錄內有 `.winmedia-workroot`，且根目錄 ACL 仍是本工具設定的狀態（關閉繼承，ACE 只有 SYSTEM 與 Administrators）。
+- 下列情況會拒絕執行，ACL 不動：
+  - WorkDir 是磁碟根目錄（例如 `E:\` 或 UNC 共用根目錄）。
+  - 既存、非空、沒有可信標記的目錄。錯誤訊息會列出擋住執行的項目。舊版留下的 WorkDir 第一次執行會因此被擋，請改用新的或空的 WorkDir，或把 OutputDir、MountDir 移出 WorkDir。
+  - WorkDir 或允許項目的擁有者不是 Administrators、SYSTEM 或目前使用者。
+  - WorkDir 本身、允許項目，或要清空的工作子目錄內有 junction 或符號連結。
+- 根目錄若手動加過 ACE，標記會被判定為不可信，改依上面「是否為空」的規則處理。
+- 非 NTFS／ReFS 卷（例如 FAT32、exFAT）沒有 ACL：只發出警告、不套用 ACL，標記存在即信任。這類卷上 WorkDir 與 `defender-state.json` 不受權限保護。
+- 復原：若錯誤訊息只列出 `.winmedia-workroot`，代表上次寫入標記後套用權限沒有完成。確認目錄內容後刪除 `.winmedia-workroot`，再重新執行。
+- Defender 排除（設定 `DefenderExclusions` 開啟時）：
+  - 加入排除前先把即將新增的路徑寫入狀態檔 `<WorkDir>\defender-state.json`；結束時只移除本次新增的排除。
+  - 程序被強制結束後，下次啟動時（不論當次是否開啟 `DefenderExclusions`）只移除同時列在狀態檔、又等於本次 WorkDir、MountDir、OutputDir 其中之一的排除，其餘只發出警告、不移除。
+  - 出現「排除狀態檔仍在」或「排除狀態檔無法解析」的警告時，先到「Windows 安全性」手動檢查排除清單，再刪除狀態檔。
+
 ### 示例
 
 先預覽不實際寫入：

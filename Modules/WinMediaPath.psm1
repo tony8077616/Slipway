@@ -113,6 +113,7 @@ function Use-WinMediaWorkDir {
 
     $marker = "$Path.winmedia-owned"
     if (Test-Path -LiteralPath $Path) {
+        Assert-WinMediaNoReparsePoint -Path $Path
         if (Test-Path -LiteralPath $marker) {
             # 上次失敗留下的登記目錄：清空後再用，避免舊檔混進新成品
             Get-ChildItem -LiteralPath $Path -Force | Remove-Item -Recurse -Force
@@ -134,8 +135,168 @@ function Remove-WinMediaWorkDir {
     $marker = "$Path.winmedia-owned"
     if (-not (Test-Path -LiteralPath $marker)) { return }
     if (-not $PSCmdlet.ShouldProcess($Path, '刪除工作子目錄')) { return }
-    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Recurse -Force }
+    if (Test-Path -LiteralPath $Path) {
+        Assert-WinMediaNoReparsePoint -Path $Path
+        Remove-Item -LiteralPath $Path -Recurse -Force
+    }
     Remove-Item -LiteralPath $marker -Force
+}
+
+function Assert-WinMediaNoReparsePoint {
+    # 審查第 8 則：遞迴刪除會穿過 junction／symlink 刪到目標內容（5.1 尤其如此），所以清空前整棵樹只要有 reparse point 就拒絕；遇到即停，不進入連結
+    # shortcut: 檢查與刪除之間仍有時間差（TOCTOU），WorkDir 根目錄的 ACL 只允許 SYSTEM／Administrators 寫入，以此縮小可利用範圍
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $pending = New-Object -TypeName 'System.Collections.Generic.Stack[System.IO.FileSystemInfo]'
+    $pending.Push((Get-Item -LiteralPath $Path -Force))
+    while ($pending.Count -gt 0) {
+        $item = $pending.Pop()
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            throw "拒絕處理 reparse point（junction 或符號連結）：$($item.FullName)（請手動檢查並刪除該連結後重試）。"
+        }
+        if ($item -is [System.IO.DirectoryInfo]) {
+            foreach ($child in $item.GetFileSystemInfos()) { $pending.Push($child) }
+        }
+    }
+}
+
+function Get-WinMediaWorkDirSecurity {
+    # 純函式：WorkDir 根目錄的 ACL，關閉繼承（去掉從磁碟根目錄繼承的 Authenticated Users 修改權限），只有 SYSTEM 與 Administrators 完全控制
+    [CmdletBinding()]
+    [OutputType([System.Security.AccessControl.DirectorySecurity])]
+    param()
+
+    $security = New-Object -TypeName System.Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    foreach ($sid in 'S-1-5-18', 'S-1-5-32-544') {
+        $rule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+            [System.Security.Principal.SecurityIdentifier]$sid,
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow)
+        $security.AddAccessRule($rule)
+    }
+    return $security
+}
+
+function Set-WinMediaWorkDirAcl {
+    # 套用 ACL 的唯一入口（AST 測試確認其他地方不直接呼叫 Set-Acl）；測試一律 mock 此函式
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][System.Security.AccessControl.DirectorySecurity]$Security
+    )
+
+    if ($PSCmdlet.ShouldProcess($Path, '套用 WorkDir ACL')) { Set-Acl -LiteralPath $Path -AclObject $Security }
+}
+
+function Get-WinMediaPathOwnerSid {
+    [CmdletBinding()]
+    [OutputType([System.Security.Principal.SecurityIdentifier])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    return (Get-Acl -LiteralPath $Path).GetOwner([System.Security.Principal.SecurityIdentifier])
+}
+
+function Get-WinMediaVolumeFileSystem {
+    # 回傳路徑所在磁碟區的檔案系統名稱；UNC 或無法判斷時回傳 $null（DriveInfo 不接受 UNC）
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    try { return ([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($Path))).DriveFormat } catch { return $null }
+}
+
+function Test-WinMediaWorkRootAclTrusted {
+    # 根目錄 ACL 是否仍是 Get-WinMediaWorkDirSecurity 的狀態：受保護（不繼承），且 ACE 只有 SYSTEM 與 Administrators
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $acl = Get-Acl -LiteralPath $Path
+    if (-not $acl.AreAccessRulesProtected) { return $false }
+    $sids = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value })
+    return ($sids.Count -gt 0 -and @($sids | Where-Object { @('S-1-5-18', 'S-1-5-32-544') -notcontains $_ }).Count -eq 0)
+}
+
+function Initialize-WinMediaWorkRoot {
+    # 審查第 8 則：WorkDir 根目錄（預設在磁碟根目錄下）建立或沿用時一律重新套用 ACL；舊版目錄繼承了 D:\ 的 Authenticated Users 修改權限，只在建立時修一次不夠
+    # 審查 HIGH：只接手本工具建立（<WorkDir>\.winmedia-workroot）或為空的目錄，避免 -WorkDir 'E:\' 或使用者資料夾的權限被整棵改掉
+    # IgnorePath：主流程在初始化前就會寫入的 LogDir 與 downloads，判斷是否為空時排除
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [AllowEmptyCollection()][AllowNull()][string[]]$IgnorePath = @()
+    )
+
+    # 純字串判斷，先於任何檔案系統呼叫；兩邊去掉結尾反斜線，因為 UNC 根目錄沒有結尾反斜線而磁碟根目錄有
+    $full = [System.IO.Path]::GetFullPath($Path.TrimEnd('\', '/') + '\').TrimEnd('\')
+    if ([System.IO.Path]::GetPathRoot($full + '\').TrimEnd('\') -eq $full) {
+        throw "WorkDir 不可為磁碟根目錄：$Path（請改用根目錄下的資料夾）。"
+    }
+
+    $fileSystem = Get-WinMediaVolumeFileSystem -Path $full
+    # 未知（UNC 等）照常套用；FAT／exFAT 沒有 ACL，擁有者也無意義
+    $aclSupported = -not $fileSystem -or @('NTFS', 'ReFS') -contains $fileSystem
+    $marker = Join-Path -Path $Path -ChildPath '.winmedia-workroot'
+    # CreateNew：同名檔案（含檢查後才出現的硬連結）已存在就拋錯，不寫穿到連結目標
+    $writeMarker = {
+        $stream = [System.IO.File]::Open($full + '\.winmedia-workroot', [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write)
+        try { $bytes = [System.Text.Encoding]::ASCII.GetBytes('WinMediaRefresh'); $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+    }
+    if (Test-Path -LiteralPath $Path) {
+        if ((Get-Item -LiteralPath $Path -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            throw "WorkDir 是 reparse point（junction 或符號連結），拒絕使用：$Path（請改用一般資料夾）。"
+        }
+        $ownerAllowed = @('S-1-5-18', 'S-1-5-32-544', [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+        if ($aclSupported) {
+            $owner = Get-WinMediaPathOwnerSid -Path $Path
+            if ($ownerAllowed -notcontains $owner.Value) {
+                throw "WorkDir 已存在，但擁有者 $($owner.Value) 不是 Administrators、SYSTEM 或目前使用者，拒絕使用：$Path（請改用新的或空的 WorkDir）。"
+            }
+        }
+        # origin/main 從不寫標記，所以標記只在根目錄 ACL 仍是本工具設定的狀態時可信；非 NTFS 卷無 ACL 可驗證，有標記即信任
+        $trusted = (Test-Path -LiteralPath $marker -PathType Leaf) -and (-not $aclSupported -or (Test-WinMediaWorkRootAclTrusted -Path $Path))
+        if (-not $trusted) {
+            # 允許清單：IgnorePath 各自在 WorkDir 底下的頂層祖先（WorkDir\a\logs → WorkDir\a）；不可信的標記不在其中，視為外來項目（可能是硬連結）
+            $prefix = $full + '\'
+            $allowed = @()
+            foreach ($p in @($IgnorePath | Where-Object { $_ })) {
+                $f = [System.IO.Path]::GetFullPath($p).TrimEnd('\')
+                if ($f.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { $allowed += $prefix + $f.Substring($prefix.Length).Split('\')[0] }
+            }
+            # 允許的頂層項目也不得是 reparse point，擁有者也要合格（攻擊者可能搶先建立自己擁有的 downloads）；更深層內容不檢查
+            $blocking = @(foreach ($item in Get-ChildItem -LiteralPath $Path -Force) {
+                if (($allowed -notcontains $item.FullName.TrimEnd('\')) -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { $item.Name }
+                elseif ($aclSupported -and $ownerAllowed -notcontains (Get-WinMediaPathOwnerSid -Path $item.FullName).Value) { $item.Name }
+            })
+            if ($blocking.Count -gt 0) {
+                $shown = (@($blocking | Select-Object -First 5) -join '、') + $(if ($blocking.Count -gt 5) { ' 等' } else { '' })
+                throw "工作目錄已存在且不是本工具建立：$Path；擋住執行的項目：$shown（請改用新的或空的 WorkDir，或把 OutputDir、MountDir 移出 WorkDir）。"
+            }
+            & $writeMarker
+        }
+    }
+    else {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        & $writeMarker
+    }
+    if (-not $aclSupported) {
+        Write-Warning "WorkDir 所在磁碟區為 $fileSystem，不支援 ACL，略過權限設定：$Path（WorkDir 與 defender-state.json 不受 ACL 保護）。"
+        return
+    }
+    Set-WinMediaWorkDirAcl -Path $Path -Security (Get-WinMediaWorkDirSecurity)
+}
+
+function Resolve-WinMediaDefenderStatePath {
+    # 審查第 15 則：狀態檔放 WorkDir 根目錄（受上方 ACL 保護；清空只針對登記的子目錄，根目錄不會被清）；不可放 LogDir（預設 WorkDir\logs）
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$WorkDir)
+
+    return (Join-Path -Path $WorkDir -ChildPath 'defender-state.json')
 }
 
 function Assert-WinMediaOutputDir {
@@ -221,4 +382,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
