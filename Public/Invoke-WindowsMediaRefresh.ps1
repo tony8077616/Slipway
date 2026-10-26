@@ -177,6 +177,8 @@
     # 審查第 15 則：上次被強制結束而遺留的排除，不論本次是否開啟 DefenderExclusions 都先還原
     $defenderState = Resolve-WinMediaDefenderStatePath -WorkDir $workDir
     Restore-WinMediaDefenderExclusion -StatePath $defenderState -AllowedPath @($workDir, $mountDir, $Config.OutputDir) -Confirm:$false
+    # 舊版把狀態檔放在 WorkDir 根目錄：讀一次、還原後刪除；須在 Initialize-WinMediaWorkRoot 之後（位於 WorkDir 內）
+    Restore-WinMediaDefenderExclusion -StatePath (Join-Path -Path $workDir -ChildPath 'defender-state.json') -AllowedPath @($workDir, $mountDir, $Config.OutputDir) -Confirm:$false
     if ($Config.ContainsKey('DefenderExclusions') -and $Config.DefenderExclusions) {
         $defenderAdded = Add-WinMediaDefenderExclusion -Path @($workDir, $mountDir, $Config.OutputDir) -StatePath $defenderState
     }
