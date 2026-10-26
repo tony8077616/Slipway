@@ -216,3 +216,73 @@ Describe 'Defender 排除狀態檔（審查第 15 則：程序被強制結束後
         $restore[0].Extent.StartOffset | Should -BeLessThan $add[0].Extent.StartOffset
     }
 }
+
+Describe 'Defender 狀態檔放在 %LOCALAPPDATA%\WinMediaRefresh（WorkDir 在 RAMDisk 上，重開機後仍可還原）' -Tag 'Unit' {
+    BeforeAll {
+        Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaPath.psm1') -Force
+        $script:oldLocal = $env:LOCALAPPDATA
+        function Get-ExpectedStatePath([string]$WorkDir) {
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try { $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($WorkDir.TrimEnd('\').ToUpperInvariant())) } finally { $sha.Dispose() }
+            $key = (-join ($hash | ForEach-Object { $_.ToString('x2') })).Substring(0, 16)
+            return (Join-Path -Path $env:LOCALAPPDATA -ChildPath "WinMediaRefresh\defender-state\$key.json")
+        }
+    }
+    BeforeEach { $env:LOCALAPPDATA = Join-Path -Path $TestDrive -ChildPath ('local-' + [guid]::NewGuid().ToString('N')) }
+    AfterAll { $env:LOCALAPPDATA = $script:oldLocal }
+
+    It '大小寫不同、結尾多一個反斜線的同一個 WorkDir，回傳相同的狀態檔路徑' {
+        $a = Resolve-WinMediaDefenderStatePath -WorkDir 'D:\WinMediaWork'
+        $b = Resolve-WinMediaDefenderStatePath -WorkDir 'd:\winmediawork\'
+        $a | Should -BeExactly $b
+        $a | Should -BeExactly (Get-ExpectedStatePath 'D:\WinMediaWork')
+    }
+
+    It '不同 WorkDir 的狀態檔分開；用 Y 執行 Restore 時不讀也不刪 X 的狀態檔' {
+        Mock -ModuleName WinMediaDefender Get-MpPreference { [pscustomobject]@{ ExclusionPath = @() } }
+        Mock -ModuleName WinMediaDefender Add-MpPreference { }
+        Mock -ModuleName WinMediaDefender Remove-MpPreference { }
+        $x = Join-Path -Path $TestDrive -ChildPath 'work-x'
+        $y = Join-Path -Path $TestDrive -ChildPath 'work-y'
+        New-Item -ItemType Directory -Path $x, $y -Force | Out-Null
+        $stateX = Resolve-WinMediaDefenderStatePath -WorkDir $x
+        $stateY = Resolve-WinMediaDefenderStatePath -WorkDir $y
+        $stateX | Should -Not -Be $stateY
+        Add-WinMediaDefenderExclusion -Path @($x) -StatePath $stateX | Out-Null
+        $before = Get-Content -LiteralPath $stateX -Raw
+        Restore-WinMediaDefenderExclusion -StatePath $stateY -AllowedPath @($y) -Confirm:$false
+        Get-Content -LiteralPath $stateX -Raw | Should -BeExactly $before
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 0 -Exactly
+    }
+
+    It 'WorkDir 被刪掉之後，新位置的狀態檔仍在，下次 Restore 移除列出的排除並刪除狀態檔' {
+        $work = Join-Path -Path $TestDrive -ChildPath 'ramdisk-work'
+        New-Item -ItemType Directory -Path $work -Force | Out-Null
+        $state = Resolve-WinMediaDefenderStatePath -WorkDir $work
+        $state | Should -BeExactly (Get-ExpectedStatePath $work)
+
+        Mock -ModuleName WinMediaDefender Get-MpPreference { [pscustomobject]@{ ExclusionPath = @() } }
+        Mock -ModuleName WinMediaDefender Add-MpPreference { }
+        Mock -ModuleName WinMediaDefender Remove-MpPreference { }
+        $added = Add-WinMediaDefenderExclusion -Path @($work) -StatePath $state
+        @($added) | Should -Be @($work)
+
+        # 模擬 RAMDisk 重開機：WorkDir 整個消失
+        [System.IO.Directory]::Delete($work, $true)
+        Test-Path -LiteralPath $state | Should -BeTrue
+
+        Restore-WinMediaDefenderExclusion -StatePath $state -AllowedPath @($work) -Confirm:$false
+        Should -Invoke -CommandName Remove-MpPreference -ModuleName WinMediaDefender -Times 1 -Exactly
+        Test-Path -LiteralPath $state | Should -BeFalse
+    }
+
+    It '主流程在 Initialize-WinMediaWorkRoot 之後另外還原舊位置 WorkDir\defender-state.json（AST）' {
+        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
+        $init = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Initialize-WinMediaWorkRoot' }, $true))
+        $restore = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Restore-WinMediaDefenderExclusion' }, $true))
+        $legacy = @($restore | Where-Object { $_.Extent.Text -match '-StatePath \(Join-Path -Path \$workDir -ChildPath ''defender-state\.json''\)' })
+        $legacy.Count | Should -Be 1
+        $legacy[0].Extent.StartOffset | Should -BeGreaterThan $init[0].Extent.StartOffset
+    }
+}
