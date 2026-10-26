@@ -100,4 +100,4 @@ function Install-WinMediaStoreApp {
     }
 }
 
-Export-ModuleMember -Function Resolve-WinMediaStoreAppSet, Install-WinMediaStoreApp
+Export-ModuleMember -Function Resolve-WinMediaStoreAppSet, Install-WinMediaStoreApp, Test-WinMediaMicrosoftSignature

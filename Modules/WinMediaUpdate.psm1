@@ -7,6 +7,7 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Comm
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaOperation.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaDownload.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\PathSanitize.psm1') -Force
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaStoreApps.psm1') -Force
 
 $script:CatalogSearchUri = 'https://www.catalog.update.microsoft.com/Search.aspx?q='
 $script:CatalogDialogUri = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
@@ -237,7 +238,9 @@ function Save-WinMediaUpdateFile {
     if (-not [string]::Equals([IO.Path]::GetExtension($FileName), [IO.Path]::GetExtension($safe.FileName), [StringComparison]::OrdinalIgnoreCase)) { throw "檔名副檔名與網址不符：$FileName" }
     $target = Join-Path -Path $Destination -ChildPath $FileName
     if (Test-WinMediaFileHash -Path $target -Hash $Sha1 -Algorithm SHA1) {
-        Write-WinMediaLog -Config $Config -Level Info -Message "已存在且 SHA-1 相符，略過：$FileName"
+        # 快取檔可能是使用者自己放進 PackageDir 的：驗簽失敗只拋錯，不刪檔
+        if (-not (Test-WinMediaMicrosoftSignature -Path $target -Config $Config)) { throw "快取檔簽章無效（非 Microsoft 簽署）：$FileName" }
+        Write-WinMediaLog -Config $Config -Level Info -Message "已存在且 SHA-1 與簽章相符，略過：$FileName"
         return $target
     }
 
@@ -247,7 +250,12 @@ function Save-WinMediaUpdateFile {
         Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
         throw "SHA-1 不符，已刪除：$FileName"
     }
-    Write-WinMediaLog -Config $Config -Level Info -Message "已下載並通過 SHA-1 驗證：$FileName"
+    # UUP 的網址與 SHA-1 來自同一份未驗證回應，SHA-1 不能證明來源；以 Authenticode 補上
+    if (-not (Test-WinMediaMicrosoftSignature -Path $target -Config $Config)) {
+        Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        throw "簽章無效（非 Microsoft 簽署），已刪除：$FileName"
+    }
+    Write-WinMediaLog -Config $Config -Level Info -Message "已下載並通過 SHA-1 與簽章驗證：$FileName"
     return $target
 }
 
