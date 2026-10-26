@@ -501,18 +501,3 @@ Describe 'WorkDir ACL 與擁有者檢查（審查第 8 則）' -Tag 'Unit' {
         $init[0].Extent.StartOffset | Should -BeLessThan $use[0].Extent.StartOffset
     }
 }
-
-Describe 'Resolve-WinMediaDefenderStatePath（審查第 15 則）' -Tag 'Unit' {
-    It '狀態檔放在受 ACL 保護的 WorkDir 根目錄，檔名 defender-state.json' {
-        $p = Resolve-WinMediaDefenderStatePath -WorkDir 'D:\Work'
-        $p | Should -BeExactly 'D:\Work\defender-state.json'
-    }
-
-    It '狀態檔不在預設 LogDir（WorkDir\logs，會被清）或任何登記清空的子目錄之下' {
-        $p = Resolve-WinMediaDefenderStatePath -WorkDir 'D:\Work\'
-        $p | Should -BeExactly 'D:\Work\defender-state.json'
-        foreach ($sub in 'logs', 'media', 'winre', 'expand', 'lxp', 'update-stage') {
-            $p.StartsWith("D:\Work\$sub\", [System.StringComparison]::OrdinalIgnoreCase) | Should -BeFalse
-        }
-    }
-}

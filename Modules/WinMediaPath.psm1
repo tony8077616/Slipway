@@ -284,19 +284,23 @@ function Initialize-WinMediaWorkRoot {
         & $writeMarker
     }
     if (-not $aclSupported) {
-        Write-Warning "WorkDir 所在磁碟區為 $fileSystem，不支援 ACL，略過權限設定：$Path（WorkDir 與 defender-state.json 不受 ACL 保護）。"
+        Write-Warning "WorkDir 所在磁碟區為 $fileSystem，不支援 ACL，略過權限設定：$Path（WorkDir 不受 ACL 保護）。"
         return
     }
     Set-WinMediaWorkDirAcl -Path $Path -Security (Get-WinMediaWorkDirSecurity)
 }
 
 function Resolve-WinMediaDefenderStatePath {
-    # 審查第 15 則：狀態檔放 WorkDir 根目錄（受上方 ACL 保護；清空只針對登記的子目錄，根目錄不會被清）；不可放 LogDir（預設 WorkDir\logs）
+    # 狀態檔放使用者設定檔（與 wimlib 快取同在 %LOCALAPPDATA%\WinMediaRefresh），WorkDir 在 RAMDisk 時重開機後仍在；每個 WorkDir 一份
+    # 鍵：WorkDir 去結尾反斜線、轉大寫後的 SHA-256 前 16 個十六進位字元
     [CmdletBinding()]
     [OutputType([string])]
     param([Parameter(Mandatory)][string]$WorkDir)
 
-    return (Join-Path -Path $WorkDir -ChildPath 'defender-state.json')
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($WorkDir.TrimEnd('\').ToUpperInvariant())) } finally { $sha.Dispose() }
+    $key = (-join ($hash | ForEach-Object { $_.ToString('x2') })).Substring(0, 16)
+    return (Join-Path -Path $env:LOCALAPPDATA -ChildPath "WinMediaRefresh\defender-state\$key.json")
 }
 
 function Assert-WinMediaOutputDir {

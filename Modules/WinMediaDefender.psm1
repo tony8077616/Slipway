@@ -100,6 +100,8 @@ function Add-WinMediaDefenderExclusion {
 
 function script:Write-DefenderState {
     param([string]$StatePath, [string[]]$Path)
+    # %LOCALAPPDATA%\WinMediaRefresh\defender-state 第一次使用時不存在
+    [System.IO.Directory]::CreateDirectory((Split-Path -Path $StatePath -Parent)) | Out-Null
     [System.IO.File]::WriteAllText($StatePath, (ConvertTo-Json -InputObject @($Path)))
 }
 
