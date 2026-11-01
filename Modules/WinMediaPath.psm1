@@ -6,6 +6,42 @@ $ErrorActionPreference = 'Stop'
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\PathSanitize.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaOperation.psm1') -Force
 
+function ConvertTo-WinMediaArgumentValue {
+    # 含空白的引數值加上雙引號，供 Start-Process -ArgumentList 使用
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    if ($Value -match '\s') { return '"' + $Value + '"' }
+    return $Value
+}
+
+function Get-WinMediaRelaunchArgument {
+    # 提權重新啟動的引數：由已綁定的參數重建；路徑轉為絕對路徑，switch 以 -Name:$true 傳遞，固定帶 -NoProfile 與 -ExecutionPolicy Bypass（僅作用於新程序）
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][hashtable]$Bound,
+        [string[]]$PathKeys = @()
+    )
+
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', (ConvertTo-WinMediaArgumentValue -Value (Get-WinMediaFullPath -Path $ScriptPath)))
+    foreach ($key in $Bound.Keys) {
+        $value = $Bound[$key]
+        if ($value -is [System.Management.Automation.SwitchParameter] -or $value -is [bool]) {
+            if ([bool]$value) { $arguments += ('-{0}:$true' -f $key) }
+            continue
+        }
+        if ($PathKeys -contains $key) {
+            $value = Get-WinMediaFullPath -Path ([string]$value)
+        }
+        $arguments += ('-{0}' -f $key)
+        $arguments += ConvertTo-WinMediaArgumentValue -Value ([string]$value)
+    }
+    return [string[]]$arguments
+}
+
 function Resolve-WinMediaMountOption {
     # 補上 Step 8 新鍵的預設值（舊設定檔與測試組的設定可能沒有這些鍵），並驗證數值與輸出形式
     [CmdletBinding()]
@@ -541,4 +577,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
