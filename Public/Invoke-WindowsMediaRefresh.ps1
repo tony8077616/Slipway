@@ -90,6 +90,10 @@
     # pwsh 7 下的 DISM 主機檢查（DismUseWindowsPowerShell 為關閉時中止）；開啟時於第一次 DISM 呼叫前先檢查、沒有才匯入
     Test-WinMediaDismHost -Provider $Config.DismProvider -Config $Config
     $Config.MountDir = Resolve-WinMediaMountDir -WorkDir $Config.WorkDir -MountDir $Config.MountDir
+    # .esd 來源沒有開機檔與媒體樹：輸出形式在此一次決定（明確指定 Iso／Folder 直接拒絕，早於任何檔案動作）
+    $isEsdSource = [System.IO.Path]::GetExtension($SourceIso) -ieq '.esd'
+    $plan = Resolve-WinMediaOutputPlan -OutputFormat $Config.OutputFormat -OutputForm $Config.OutputForm -SourceKind $(if ($isEsdSource) { 'Esd' } else { 'Iso' })
+    if ($plan.AutoImage) { Write-Warning '來源為 .esd 且未指定 OutputForm，改輸出 Image（install.wim 或 install.esd 放在 OutputDir）；.esd 來源沒有開機檔，無法打包 ISO。' }
     # 空白 = 工具所在磁碟根目錄\WinMediaOut（與 WorkDir 並列，不在 OneDrive 內，不受第 12 步清理影響）
     if ([string]::IsNullOrWhiteSpace($Config.OutputDir)) {
         $Config.OutputDir = Join-Path -Path ([System.IO.Path]::GetPathRoot($PSScriptRoot)) -ChildPath 'WinMediaOut'
@@ -161,12 +165,12 @@
         throw "找不到 LXP 資料夾：$($Config.Lxp.Path)"
     }
     if ($Config.WinPEUpdate -notin 'SafeOS', 'Lcu') { throw "不支援的 WinPEUpdate：$($Config.WinPEUpdate)" }
-    # 輸出形式與工具需求一次決定（藍圖 F7）：oscdimg 只在 Iso 時需要；wimlib 已由上方為 boot.wim 解析，此處只在 ESD 時補上
-    $plan = Resolve-WinMediaOutputPlan -OutputFormat $Config.OutputFormat -OutputForm $Config.OutputForm
+    # $plan 已於 Resolve-WinMediaMountDir 之後算好（含 .esd 來源規則），此處沿用
     # 可寫掛載才帶 -Optimize／-CheckIntegrity（Keel 的 Remount 參數集不接受；唯讀掛載不需要）
     $mountSwitches = Get-WinMediaMountSwitch -Config $Config
     # DISM 共用參數（只在設定 ScratchDirectory 時含鍵）；每個 DISM 呼叫都要 splat，由 AST 測試確認
     $common = Get-WinMediaDismCommonParameter -Config $Config
+    # 工具需求依 $plan：oscdimg 只在 Iso 時需要；wimlib 已由上方為 boot.wim 解析，此處只在 ESD 時補上
     $oscdimg = $null
     if ($plan.NeedsOscdimg) { $oscdimg = Resolve-WinMediaOscdimg -Config $Config }
     if ($plan.NeedsWimlib) { $null = Resolve-WinMediaWimlib -Config $Config }
@@ -187,6 +191,14 @@
     $winreWim = Join-Path -Path $winreDir -ChildPath 'winre.wim'
 
     # 輸出目錄不得位於會被清理或掛載的目錄之下（Must 2）；須在 Use 迴圈之前檢查，否則已登記目錄會先被清空
+    # 來源不得位於會被 Use-WinMediaWorkDir 清空的目錄之內，否則使用者的原始檔會先被清掉（ISO 與 .esd 來源都適用）
+    foreach ($dir in @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir)) {
+        if (Test-PathWithin -Child $SourceIso -Parent $dir) { throw "來源映像位於工作子目錄之內，會被清空：$SourceIso" }
+    }
+    # 來源即上一次的 Image 輸出時，匯出會先刪除目的檔（即使用者的來源），因此直接拒絕
+    foreach ($outName in 'install.esd', 'install.wim') {
+        if ((Get-WinMediaFullPath -Path $SourceIso) -ieq (Get-WinMediaFullPath -Path (Join-Path -Path $Config.OutputDir -ChildPath $outName))) { throw "來源與輸出相同，會被覆寫：$SourceIso" }
+    }
     Assert-WinMediaOutputDir -OutputDir $Config.OutputDir -ProtectedDir @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir, $mountDir)
     # 掛載目錄若已存在且非空，直接中止，不像 Convert-UUP.cmd:1060 那樣 rmdir 既有目錄
     if ((Test-Path -LiteralPath $mountDir) -and @(Get-ChildItem -LiteralPath $mountDir -Force).Count -gt 0) {
@@ -230,6 +242,11 @@
         Write-WinMediaLog -Config $Config -Level Info -Message "語言包 $(@($langFod.LangPacks).Count) 個、FoD $(@($langFod.Fod).Count) 個（依 Languages 篩選，於 LCU 之後注入）。"
     }
 
+    if ($isEsdSource) {
+        # .esd 來源沒有媒體樹：副本放在 media\sources\install.esd，下方步驟 2a 轉換後移除副本，原始檔不動
+        Copy-WinMediaEsdSource -SourcePath $SourceIso -DestinationPath $installEsd -WimPath $installWim -WorkDir $workDir -Config $Config
+    }
+    else {
     # 步驟 2：掛載母檔（唯讀）並複製；母檔不修改（§3.3）
     $isoMount = Mount-WinMediaSourceIso -ImagePath $SourceIso -Confirm:$false
     try {
@@ -247,6 +264,7 @@
     Get-ChildItem -LiteralPath $mediaDir -Recurse -Force -File | ForEach-Object { $_.IsReadOnly = $false }
     # 步驟 2 之後、2a 之前：移除未選取的額外語言（先於步驟 8 的 Setup DU，使 /U 規則不會把它們建回來）
     Remove-WinMediaExtraLanguage -MediaDir $mediaDir -Languages @($Config.Languages) -Config $Config
+    }  # 結束：非 .esd 來源
 
     # 步驟 2a：install.esd → install.wim（§2.7.3）
     if (Test-Path -LiteralPath $installEsd) {
@@ -421,7 +439,7 @@
             } | Out-Null
             # 文件步驟之後（convert-UUP 3895–3930 行）：最後執行，使開機檔取自已套用 LCU 的映像
             # 缺鍵時視為開啟（預設開）；StrictMode 下直接讀取缺少的鍵會拋錯，因此先用 ContainsKey
-            if (-not $Config.ContainsKey('UpdateBootFiles') -or $Config.UpdateBootFiles) { $bootEx.Applied = Copy-WinMediaUpdatedBootFiles -MountPath $mounted -MediaDir $mediaDir -Config $Config }
+            if (-not $isEsdSource) { if (-not $Config.ContainsKey('UpdateBootFiles') -or $Config.UpdateBootFiles) { $bootEx.Applied = Copy-WinMediaUpdatedBootFiles -MountPath $mounted -MediaDir $mediaDir -Config $Config } }
         } | Out-Null
     }
 
@@ -432,6 +450,8 @@
         }
     }
 
+    # 步驟 8–9 需要媒體樹（Setup DU、boot.wim），.esd 來源略過
+    if (-not $isEsdSource) {
     # 步驟 8（文件第 26 列）：Setup DU 先展開到暫存目錄，再依 convert-UUP 2349–2358 行的規則複製進 sources（只更新既有檔與既有語言）；其後的 setup.exe／setuphost.exe 由步驟 9 的 boot.wim 索引 2 同步覆蓋（第 27 列）；兩者的先後順序不可對調
     if ($setupDu) {
         $duDir = Join-Path -Path $workDir -ChildPath 'setupdu'
@@ -508,6 +528,7 @@
     # 步驟 9 之後：boot.wim export（--boot）與 optimize，對應 convert-UUP 的 wimlib export／optimize
     Compress-WinMediaBootWim -BootWim $bootWim -Config $Config
 
+    }  # 結束：非 .esd 來源（步驟 8–9）
     # 步驟 10：移除來源 EnterpriseS（僅在設定開啟且已建立虛擬版本時，§2.7.6）
     if ($Config.DeleteSourceEdition -and $virtualEditions.Count -gt 0 -and $ltscIndex) {
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
@@ -515,6 +536,7 @@
         } | Out-Null
     }
 
+    if (-not $isEsdSource) {
     # 步驟 10（續）：ei.cfg 必須在索引移除之後判斷（§2.7.5）
     $eiCfg = Join-Path -Path $sourcesDir -ChildPath 'ei.cfg'
     $userEiCfg = Join-Path -Path $Config.PackageDir -ChildPath 'ei.cfg'
@@ -534,6 +556,9 @@
         }
     }
 
+    }  # 結束：非 .esd 來源（ei.cfg）
+    # 檔名只在 Iso 與 Folder 需要，Image 不組名（避免 Image 執行時出現無關的「組 ISO 檔名失敗」警告）
+    if ($plan.OutputForm -ne 'Image') {
     # 步驟 11：輸出形式（藍圖 F7）；檔名在任何 ESD 匯出移除 install.wim 之前組好，供 Iso 與 Folder 共用
     # 組檔名所需的建置資訊已在步驟 6 讀出；任何失敗只記警告並退回預設名稱，不中止整次執行
     $nameArgs = @{ Timestamp = (Get-Date -Format 'yyyyMMdd-HHmmss'); Arch = $architecture; Languages = @($syncLanguages) }
@@ -559,6 +584,7 @@
         Write-WinMediaLog -Config $Config -Level Warning -Message ('組 ISO 檔名失敗，改用預設名稱：{0}' -f $_.Exception.Message)
         $isoName = 'WinMedia_{0}.iso' -f $nameArgs.Timestamp
     }
+    }  # 結束：檔名（Iso／Folder）
     $isEsd = $Config.OutputFormat -eq 'ESD'
     switch ($plan.OutputForm) {
         'Iso' {

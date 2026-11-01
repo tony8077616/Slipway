@@ -82,15 +82,23 @@ function Resolve-WinMediaOutputPlan {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][string]$OutputFormat,
-        [AllowEmptyString()][string]$OutputForm = ''
+        [AllowEmptyString()][string]$OutputForm = '',
+        [ValidateSet('Iso', 'Esd')][string]$SourceKind = 'Iso'
     )
 
     if ($OutputFormat -notin 'WIM', 'ESD') { throw "不支援的 OutputFormat：$OutputFormat" }
     $form = if ([string]::IsNullOrWhiteSpace($OutputForm)) { 'Iso' } else { $OutputForm }
+    $autoImage = $false
+    # .esd 來源沒有開機檔與媒體樹：未指定時自動改用 Image（並警告）；明確指定 Iso 或 Folder 直接拒絕，不做任何檔案動作（藍圖 2(a)）
+    if ($SourceKind -eq 'Esd') {
+        if ([string]::IsNullOrWhiteSpace($OutputForm)) { $form = 'Image'; $autoImage = $true }
+        elseif ($OutputForm -in 'Iso', 'Folder') { throw "來源為 .esd 時只允許 OutputForm=Image（Iso 與 Folder 需要開機檔，.esd 來源沒有）：$OutputForm" }
+    }
     return [pscustomobject]@{
         OutputForm   = $form
         NeedsOscdimg = ($form -eq 'Iso')
-        NeedsWimlib  = ($OutputFormat -eq 'ESD')
+        NeedsWimlib  = ($OutputFormat -eq 'ESD' -or $SourceKind -eq 'Esd')
+        AutoImage    = $autoImage
     }
 }
 
@@ -104,6 +112,30 @@ function Get-WinMediaMountSwitch {
     if ($Config.MountOptimize) { $switches.Optimize = $true }
     if ($Config.MountCheckIntegrity) { $switches.CheckIntegrity = $true }
     return $switches
+}
+
+function Copy-WinMediaEsdSource {
+    # .esd 來源先複製進 WorkDir（media\sources\install.esd）再轉換；使用者的原始檔不被移動、不被轉換（藍圖 2(c)）
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'SourcePath', Justification = '由 Invoke-WinMediaOperation 的 scriptblock 閉包使用，PSSA 無法追蹤')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [Parameter(Mandatory)][string]$WimPath,
+        [Parameter(Mandatory)][string]$WorkDir,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    foreach ($path in $DestinationPath, $WimPath) {
+        if (-not (Test-PathWithin -Child $path -Parent $WorkDir)) { throw "ESD 副本與 install.wim 必須位於 WorkDir 內：$path" }
+    }
+    $dir = Split-Path -Parent $DestinationPath
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Invoke-WinMediaOperation -Category File -Operation 'CopyEsdSource' -Target $DestinationPath -Config $Config -ScriptBlock {
+        Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+    } | Out-Null
+    # 來源常為唯讀（例如從 DVD 或 ISO 取得）；副本需可寫，轉換後才能移除
+    (Get-Item -LiteralPath $DestinationPath).IsReadOnly = $false
 }
 
 function Get-WinMediaFullPath {
@@ -611,4 +643,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Get-WinMediaMountSwitch, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Get-WinMediaMountSwitch, Copy-WinMediaEsdSource, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
