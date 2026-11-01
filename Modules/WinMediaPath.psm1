@@ -13,7 +13,13 @@ function Get-WinMediaFullPath {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
 
     $plain = $Path -replace '^Microsoft\.PowerShell\.Core\\FileSystem::', ''
-    return [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($plain))
+    try {
+        return [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($plain))
+    }
+    catch {
+        # 磁碟機代號不存在時 PowerShell 會丟出 DriveNotFound；改以 .NET 直接展開，讓上層仍能給出中文訊息
+        return [System.IO.Path]::GetFullPath($plain)
+    }
 }
 
 function Test-WinMediaNetworkPath {
@@ -116,7 +122,7 @@ function Assert-WinMediaScratchPath {
 
     Assert-WinMediaLocalPath -Path $ScratchDirectory -Name 'ScratchDirectory'
     $scratch = Get-WinMediaFullPath -Path $ScratchDirectory
-    $mediaDir = Join-Path -Path (Get-WinMediaFullPath -Path $WorkDir) -ChildPath 'media'
+    $mediaDir = [System.IO.Path]::Combine((Get-WinMediaFullPath -Path $WorkDir), 'media')
     if (Test-PathWithin -Child $scratch -Parent (Get-WinMediaFullPath -Path $MountDir)) {
         throw "ScratchDirectory 不得位於 MountDir 之內：$ScratchDirectory"
     }

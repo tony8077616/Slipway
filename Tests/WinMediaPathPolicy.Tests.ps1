@@ -25,6 +25,12 @@ Describe 'WinMediaPath 網路路徑政策' -Tag 'Unit' {
         Test-WinMediaNetworkPath -Path '' | Should -BeFalse
     }
 
+    It '不存在的磁碟機代號不丟 DriveNotFound，視為本機路徑' {
+        Test-WinMediaNetworkPath -Path 'Q:\x' | Should -BeFalse
+        { Assert-WinMediaScratchPath -ScratchDirectory 'Q:\s' -MountDir 'Q:\Mount' -WorkDir 'Q:\Work' } | Should -Not -Throw
+        Get-WinMediaCloudProvider -Path 'Q:\x' | Should -BeNullOrEmpty
+    }
+
     It 'Assert-WinMediaLocalPath 對 UNC 丟出含名稱與路徑的中文訊息' {
         { Assert-WinMediaLocalPath -Path '\\server\share' -Name 'WorkDir' } | Should -Throw '*WorkDir 不支援網路路徑*'
     }
