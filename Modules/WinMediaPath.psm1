@@ -6,6 +6,125 @@ $ErrorActionPreference = 'Stop'
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\PathSanitize.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaOperation.psm1') -Force
 
+function Get-WinMediaFullPath {
+    # 正規化路徑：去除 PowerShell 提供者前綴，依 PowerShell 位置展開相對路徑
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+
+    $plain = $Path -replace '^Microsoft\.PowerShell\.Core\\FileSystem::', ''
+    return [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($plain))
+}
+
+function Test-WinMediaNetworkPath {
+    # 網路路徑判斷：UNC（含 \\?\UNC\）或對應到網路磁碟機的磁碟區；本機的 \\?\C:\ 形式視為本機
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $full = Get-WinMediaFullPath -Path $Path
+    if ($full.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ($full.StartsWith('\\?\', [System.StringComparison]::Ordinal)) { $full = $full.Substring(4) }
+    if ($full.StartsWith('\\', [System.StringComparison]::Ordinal)) { return $true }
+    $root = [System.IO.Path]::GetPathRoot($full)
+    if ($root -notmatch '^[A-Za-z]:\\$') { return $false }
+    try {
+        return ([System.IO.DriveInfo]::new($root)).DriveType -eq [System.IO.DriveType]::Network
+    }
+    catch {
+        return $false
+    }
+}
+
+function Assert-WinMediaLocalPath {
+    # 拒絕網路路徑（需求第 6、10 項）；僅在 Slipway 執行，Keel 不做此檢查
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if (Test-WinMediaNetworkPath -Path $Path) {
+        throw "$Name 不支援網路路徑：$Path。請改用本機磁碟，並以 -WorkDir 與 -OutputDir 指定本機資料夾。"
+    }
+}
+
+function Get-WinMediaCloudProvider {
+    # 雲端同步資料夾的供應商表（資料驅動）；目前以環境變數判斷，登錄檔來源待驗證後再加入
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+
+    $table = @(
+        @{ Name = 'OneDrive'; EnvVars = @('OneDrive', 'OneDriveConsumer', 'OneDriveCommercial') }
+    )
+    $full = (Get-WinMediaFullPath -Path $Path).TrimEnd('\') + '\'
+    foreach ($provider in $table) {
+        foreach ($var in $provider.EnvVars) {
+            $root = [Environment]::GetEnvironmentVariable($var)
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            $rootWithSep = (Get-WinMediaFullPath -Path $root).TrimEnd('\') + '\'
+            if ($full.StartsWith($rootWithSep, [System.StringComparison]::OrdinalIgnoreCase)) { return $provider.Name }
+        }
+    }
+    return $null
+}
+
+function Test-WinMediaNtfsVolume {
+    # MountDir 必須位於 NTFS 磁碟區（掛載需要）；UNC 或無法判斷時為 $false
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    return (Get-WinMediaVolumeFileSystem -Path $Path) -eq 'NTFS'
+}
+
+function Test-WinMediaAdministrator {
+    # 目前行程是否具系統管理員權限（獨立成函式以便測試時模擬）
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-WinMediaVolumeFreeSpaceGB {
+    # 路徑所在磁碟區的可用空間（GB）；無法判斷時回傳 $null
+    [CmdletBinding()]
+    [OutputType([double])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $drive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot((Get-WinMediaFullPath -Path $Path)))
+        return [math]::Round($drive.AvailableFreeSpace / 1GB, 2)
+    }
+    catch {
+        return $null
+    }
+}
+
+function Assert-WinMediaScratchPath {
+    # ScratchDirectory 必須是本機路徑，且不得位於 MountDir 或 WorkDir\media 之內（藍圖 2(d)、F12）
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ScratchDirectory,
+        [Parameter(Mandatory)][string]$MountDir,
+        [Parameter(Mandatory)][string]$WorkDir
+    )
+
+    Assert-WinMediaLocalPath -Path $ScratchDirectory -Name 'ScratchDirectory'
+    $scratch = Get-WinMediaFullPath -Path $ScratchDirectory
+    $mediaDir = Join-Path -Path (Get-WinMediaFullPath -Path $WorkDir) -ChildPath 'media'
+    if (Test-PathWithin -Child $scratch -Parent (Get-WinMediaFullPath -Path $MountDir)) {
+        throw "ScratchDirectory 不得位於 MountDir 之內：$ScratchDirectory"
+    }
+    if (Test-PathWithin -Child $scratch -Parent $mediaDir) {
+        throw "ScratchDirectory 不得位於 WorkDir\media 之內：$ScratchDirectory"
+    }
+}
+
 function Test-WinMediaPathOverlap {
     # §3.4：更新原始檔、驅動、LXP、WorkDir 兩兩不得重疊（相等、包含或被包含）
     [CmdletBinding()]
@@ -386,4 +505,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
