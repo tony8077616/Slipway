@@ -114,6 +114,23 @@ function Get-WinMediaMountSwitch {
     return $switches
 }
 
+function Resolve-WinMediaScriptDefault {
+    # 腳本預設路徑（Update-WindowsMedia.ps1 與 Clear-WindowsMediaWorkspace.ps1 共用）：參數 → 設定檔 → 腳本所在磁碟根目錄下的子資料夾
+    # 兩支腳本必須算出相同路徑，因為 Defender 狀態檔的名稱是 WorkDir 的雜湊（Resolve-WinMediaDefenderStatePath）
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyString()][string]$Value,
+        [AllowEmptyString()][string]$ConfigValue,
+        [Parameter(Mandatory)][string]$RootDir,
+        [Parameter(Mandatory)][string]$ChildName
+    )
+
+    if ($Value) { return $Value }
+    if ($ConfigValue) { return $ConfigValue }
+    return (Join-Path -Path ([System.IO.Path]::GetPathRoot($RootDir)) -ChildPath $ChildName)
+}
+
 function Copy-WinMediaEsdSource {
     # .esd 來源先複製進 WorkDir（media\sources\install.esd）再轉換；使用者的原始檔不被移動、不被轉換（藍圖 2(c)）
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'SourcePath', Justification = '由 Invoke-WinMediaOperation 的 scriptblock 閉包使用，PSSA 無法追蹤')]
@@ -643,4 +660,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Get-WinMediaMountSwitch, Copy-WinMediaEsdSource, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Get-WinMediaMountSwitch, Resolve-WinMediaScriptDefault, Copy-WinMediaEsdSource, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
