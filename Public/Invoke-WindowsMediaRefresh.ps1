@@ -163,6 +163,10 @@
     if ($Config.WinPEUpdate -notin 'SafeOS', 'Lcu') { throw "不支援的 WinPEUpdate：$($Config.WinPEUpdate)" }
     # 輸出形式與工具需求一次決定（藍圖 F7）：oscdimg 只在 Iso 時需要；wimlib 已由上方為 boot.wim 解析，此處只在 ESD 時補上
     $plan = Resolve-WinMediaOutputPlan -OutputFormat $Config.OutputFormat -OutputForm $Config.OutputForm
+    # 可寫掛載才帶 -Optimize／-CheckIntegrity（Keel 的 Remount 參數集不接受；唯讀掛載不需要）
+    $mountSwitches = Get-WinMediaMountSwitch -Config $Config
+    # DISM 共用參數（只在設定 ScratchDirectory 時含鍵）；每個 DISM 呼叫都要 splat，由 AST 測試確認
+    $common = Get-WinMediaDismCommonParameter -Config $Config
     $oscdimg = $null
     if ($plan.NeedsOscdimg) { $oscdimg = Resolve-WinMediaOscdimg -Config $Config }
     if ($plan.NeedsWimlib) { $null = Resolve-WinMediaWimlib -Config $Config }
@@ -186,6 +190,11 @@
     Assert-WinMediaOutputDir -OutputDir $Config.OutputDir -ProtectedDir @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir, $mountDir)
     # 掛載目錄若已存在且非空，直接中止，不像 Convert-UUP.cmd:1060 那樣 rmdir 既有目錄
     if ((Test-Path -LiteralPath $mountDir) -and @(Get-ChildItem -LiteralPath $mountDir -Force).Count -gt 0) {
+        # 映像掛載在子資料夾（install-N、boot-N、winre…）而非 $mountDir 本身；需要重新掛載的只拒絕並指向清理步驟，不在此自動處理
+        $stale = @(Get-ChildItem -LiteralPath $mountDir -Directory -Force | Where-Object { (Get-WinMediaMountState -Path $_.FullName -Config $Config) -eq 'NeedsRemount' })
+        if ($stale.Count -gt 0) {
+            throw "掛載目錄內有需要重新掛載（NeedsRemount）的映像：$($stale[0].FullName)。請先執行 Clear-WindowsMediaWorkspace.ps1（步驟 11）清理，再重試。"
+        }
         throw "掛載目錄已存在且非空：$mountDir（請指定空目錄或刪除後重試）。"
     }
     $mountDirCreated = -not (Test-Path -LiteralPath $mountDir)
@@ -200,7 +209,8 @@
     if ($Config.ContainsKey('DefenderExclusions') -and $Config.DefenderExclusions) {
         $defenderAdded = Add-WinMediaDefenderExclusion -Path @($workDir, $mountDir, $Config.OutputDir) -StatePath $defenderState
     }
-    foreach ($dir in @($mountDir, $Config.LogDir, $Config.OutputDir)) {
+    # ScratchDirectory 由本工具建立（Keel 的 DISM 包裝不建立）；空白時略過
+    foreach ($dir in @($mountDir, $Config.LogDir, $Config.OutputDir, $Config.ScratchDirectory) | Where-Object { $_ }) {
         if (-not (Test-Path -LiteralPath $dir)) {
             Invoke-WinMediaOperation -Category File -Operation 'CreateDirectory' -Target $dir -Config $Config -ScriptBlock {
                 New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -335,20 +345,20 @@
 
     # WinRE 套用 SafeOS DU 後的 ntoskrnl 版本，供步驟 9 守衛判斷開機索引是否取自已更新的 WinRE
     $winreKernel = @{ Base = $null; Version = $null }
-    Mount-WinMediaImage -ImagePath $winreWim -Index 1 -MountPath (Join-Path -Path $mountDir -ChildPath 'winre') -Config $Config -Action {
+    Mount-WinMediaImage -ImagePath $winreWim -Index 1 -MountPath (Join-Path -Path $mountDir -ChildPath 'winre') @mountSwitches -Config $Config -Action {
         param($mounted)
         Write-WinMediaLog -Config $Config -Level Verbose -Message "WinRE 掛載點：$mounted"
         $winreKernel.Base = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsPackage -Path $mounted -PackagePath $ssu -LogLevel $Config.DismLogLevel | Out-Null
+            Add-WindowsPackage -Path $mounted -PackagePath $ssu @common -LogLevel $Config.DismLogLevel | Out-Null
         }
         if ($safeOs) {
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $safeOs -LogLevel $Config.DismLogLevel | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $safeOs @common -LogLevel $Config.DismLogLevel | Out-Null
             }
         }
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:([bool]$Config.ResetBase) -LogLevel $Config.DismLogLevel | Out-Null
+            Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:([bool]$Config.ResetBase) @common -LogLevel $Config.DismLogLevel | Out-Null
         }
         $winreKernel.Version = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
         if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'WinRE' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
@@ -362,32 +372,36 @@
     # 第一個目標索引的建置資訊（SOFTWARE hive：CurrentBuild、UBR、DisplayVersion、BuildBranch），供步驟 11 組 ISO 檔名；讀取失敗時保持 $null
     $buildInfo = @{ Info = $null }
     foreach ($index in $targets) {
-        Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) -Config $Config -Action {
+        Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) @mountSwitches -Config $Config -Action {
             param($mounted)
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $ssu -LogLevel $Config.DismLogLevel | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $ssu @common -LogLevel $Config.DismLogLevel | Out-Null
             }
             # 文件步驟 10–11：語言包與 FoD 必須在最新 LCU 之前注入
             Install-WinMediaLangFod -MountPath $mounted -Set $langFod -Config $Config
             # 文件步驟 13：最新 LCU（連同前置 checkpoint，經暫存資料夾）
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $lcuStage -LogLevel $Config.DismLogLevel | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $lcuStage @common -LogLevel $Config.DismLogLevel | Out-Null
             }
             # 文件步驟 14：cleanup；CBS_E_PENDING（0x800F0806）只警告，其他錯誤照常中止（Mount-WinMediaImage 失敗時會 Discard）
             try {
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:$resetBaseOS -LogLevel $Config.DismLogLevel | Out-Null
+                    Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:$resetBaseOS @common -LogLevel $Config.DismLogLevel | Out-Null
                 } | Out-Null
             }
             catch {
                 if ($_.Exception.HResult -ne -2146498554 -and $_.Exception.Message -notmatch '0x800f0806') { throw }
                 Write-WinMediaLog -Config $Config -Level Warning -Message 'install.wim cleanup 有待處理作業（0x800F0806），略過本次 cleanup；需開機完成後再處理。'
             }
+            # 選用：WIMBoot 等最佳化目標（OptimizationTarget 為空時不呼叫）；值原樣傳給 DISM，不做驗證（藍圖 F13）
+            if (-not [string]::IsNullOrWhiteSpace($Config.OptimizationTarget)) {
+                Optimize-WinMediaImage -Path $mounted -OptimizationTarget $Config.OptimizationTarget -Config $Config
+            }
             # 文件步驟 15：NetFx3 必須在 cleanup 之後、.NET CU 之前
             Install-WinMediaDeferredFod -MountPath $mounted -Set $langFod -Config $Config
             if ($dotNet) {
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Add-WindowsPackage -Path $mounted -PackagePath $dotNet -LogLevel $Config.DismLogLevel | Out-Null
+                    Add-WindowsPackage -Path $mounted -PackagePath $dotNet @common -LogLevel $Config.DismLogLevel | Out-Null
                 }
             }
             if ($appxList) { Remove-WinMediaAppx -MountPath $mounted -AppxList $appxList -Config $Config }
@@ -438,18 +452,18 @@
 
     # 步驟 9：boot.wim 索引 1 與 2（§3.2 step 7、8）
     foreach ($bootIndex in 1, 2) {
-        Mount-WinMediaImage -ImagePath $bootWim -Index $bootIndex -MountPath (Join-Path -Path $mountDir -ChildPath ('boot-{0}' -f $bootIndex)) -Config $Config -Action {
+        Mount-WinMediaImage -ImagePath $bootWim -Index $bootIndex -MountPath (Join-Path -Path $mountDir -ChildPath ('boot-{0}' -f $bootIndex)) @mountSwitches -Config $Config -Action {
             param($mounted)
             # 不單獨加入 SSU：獨立加入的 SSU 會被暫停（pended），其後的 LCU 會被略過、CBS 停留在 9441；LCU 套件本身已含 SSU（實測單獨加入即升至 9711）
             # 直接套用目標 LCU msu（資料夾模式會先處理較舊的 checkpoint msu，實測 KB5043080 回 0x80070228）
             # 只有 Lcu 路線在此以原始 MSU 直接加入 LCU；實測 DISM 判定 Not applicable（無效果），SafeOS 路線的核心版本由步驟 5 的 SafeOS DU 提供
             if ($Config.WinPEUpdate -eq 'Lcu') {
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target -LogLevel $Config.DismLogLevel | Out-Null
+                    Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target @common -LogLevel $Config.DismLogLevel | Out-Null
                 }
             }
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Repair-WindowsImage -Path $mounted -StartComponentCleanup -LogLevel $Config.DismLogLevel | Out-Null
+                Repair-WindowsImage -Path $mounted -StartComponentCleanup @common -LogLevel $Config.DismLogLevel | Out-Null
             }
             $bootKernel = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
             Test-WinMediaKernelConsistency -BootKernel $bootKernel -WinreKernel $winreKernel.Version -InstallKernel $installKernel.Version -WinreBaseKernel $winreKernel.Base -BootIndex $bootIndex
@@ -497,7 +511,7 @@
     # 步驟 10：移除來源 EnterpriseS（僅在設定開啟且已建立虛擬版本時，§2.7.6）
     if ($Config.DeleteSourceEdition -and $virtualEditions.Count -gt 0 -and $ltscIndex) {
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Remove-WindowsImage -ImagePath $installWim -Index $ltscIndex.ImageIndex -LogLevel $Config.DismLogLevel | Out-Null
+            Remove-WindowsImage -ImagePath $installWim -Index $ltscIndex.ImageIndex @common -LogLevel $Config.DismLogLevel | Out-Null
         } | Out-Null
     }
 
@@ -505,7 +519,7 @@
     $eiCfg = Join-Path -Path $sourcesDir -ChildPath 'ei.cfg'
     $userEiCfg = Join-Path -Path $Config.PackageDir -ChildPath 'ei.cfg'
     $finalCount = @(Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-        Get-WindowsImage -ImagePath $installWim -LogLevel $Config.DismLogLevel
+        Get-WindowsImage -ImagePath $installWim @common -LogLevel $Config.DismLogLevel
     }).Count
     if ($finalCount -gt 1) {
         if (Test-Path -LiteralPath $userEiCfg) {

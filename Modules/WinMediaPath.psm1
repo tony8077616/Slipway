@@ -63,6 +63,10 @@ function Resolve-WinMediaMountOption {
     if ($Config.OutputForm -notin '', 'Iso', 'Folder', 'Image') {
         throw "OutputForm 只允許 Iso、Folder、Image（或空白＝自動），目前為：'$($Config.OutputForm)'。"
     }
+    # 字串 'false' 為真值，會靜默開啟 DISM 選項，因此非布林一律拒絕（與 ForceUnsigned、ResetBaseOS 相同規則）
+    foreach ($key in 'MountOptimize', 'MountCheckIntegrity') {
+        if ($Config[$key] -isnot [bool]) { throw "$key 必須為 `$true 或 `$false，目前為：'$($Config[$key])'。" }
+    }
     if (-not ($Config.MountParallelCount -is [int]) -or $Config.MountParallelCount -lt 1) {
         throw "MountParallelCount 必須為 1 以上的整數，目前為：'$($Config.MountParallelCount)'。"
     }
@@ -88,6 +92,18 @@ function Resolve-WinMediaOutputPlan {
         NeedsOscdimg = ($form -eq 'Iso')
         NeedsWimlib  = ($OutputFormat -eq 'ESD')
     }
+}
+
+function Get-WinMediaMountSwitch {
+    # 可寫掛載要帶的開關（Mount-WinMediaImage 的 Mount 參數集）：只在設定為 $true 時加鍵；Remount 參數集不接受這些開關
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([Parameter(Mandatory)][hashtable]$Config)
+
+    $switches = @{}
+    if ($Config.MountOptimize) { $switches.Optimize = $true }
+    if ($Config.MountCheckIntegrity) { $switches.CheckIntegrity = $true }
+    return $switches
 }
 
 function Get-WinMediaFullPath {
@@ -595,4 +611,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Get-WinMediaMountSwitch, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir

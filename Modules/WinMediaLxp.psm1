@@ -63,12 +63,13 @@ function Install-WinMediaLxp {
         [Parameter(Mandatory)][hashtable]$Config
     )
 
+    $common = Get-WinMediaDismCommonParameter -Config $Config
     foreach ($item in $Lxp) {
         $pkg = $item.PackagePath
         $lic = $item.LicensePath
         Write-WinMediaLog -Config $Config -Level Info -Message "加入 LXP：$($item.Pfn) → $MountPath"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-AppxProvisionedPackage -Path $MountPath -PackagePath $pkg -LicensePath $lic -Regions 'all' -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
+            Add-AppxProvisionedPackage -Path $MountPath -PackagePath $pkg -LicensePath $lic -Regions 'all' @common -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
         } | Out-Null
     }
 }
