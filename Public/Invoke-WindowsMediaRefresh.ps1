@@ -161,12 +161,11 @@
         throw "找不到 LXP 資料夾：$($Config.Lxp.Path)"
     }
     if ($Config.WinPEUpdate -notin 'SafeOS', 'Lcu') { throw "不支援的 WinPEUpdate：$($Config.WinPEUpdate)" }
+    # 輸出形式與工具需求一次決定（藍圖 F7）：oscdimg 只在 Iso 時需要；wimlib 已由上方為 boot.wim 解析，此處只在 ESD 時補上
+    $plan = Resolve-WinMediaOutputPlan -OutputFormat $Config.OutputFormat -OutputForm $Config.OutputForm
     $oscdimg = $null
-    switch ($Config.OutputFormat) {
-        'WIM' { $oscdimg = Resolve-WinMediaOscdimg -Config $Config }
-        'ESD' { $null = Resolve-WinMediaWimlib -Config $Config }
-        default { throw "不支援的 OutputFormat：$($Config.OutputFormat)" }
-    }
+    if ($plan.NeedsOscdimg) { $oscdimg = Resolve-WinMediaOscdimg -Config $Config }
+    if ($plan.NeedsWimlib) { $null = Resolve-WinMediaWimlib -Config $Config }
     if ($Config.DismProvider -eq 'ADK') { $null = Resolve-WinMediaAdk -Config $Config }
 
     $workDir = $Config.WorkDir
@@ -521,59 +520,88 @@
         }
     }
 
-    # 步驟 11：輸出；ESD 寫入 OutputDir（不留在 WorkDir），ISO 以 oscdimg 產生
-    if ($Config.OutputFormat -eq 'ESD') {
-        $output = Join-Path -Path $Config.OutputDir -ChildPath 'install.esd'
-        if ((Test-Path -LiteralPath $output) -and -not $Force) {
-            throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
+    # 步驟 11：輸出形式（藍圖 F7）；檔名在任何 ESD 匯出移除 install.wim 之前組好，供 Iso 與 Folder 共用
+    # 組檔名所需的建置資訊已在步驟 6 讀出；任何失敗只記警告並退回預設名稱，不中止整次執行
+    $nameArgs = @{ Timestamp = (Get-Date -Format 'yyyyMMdd-HHmmss'); Arch = $architecture; Languages = @($syncLanguages) }
+    try {
+        $info = $buildInfo.Info
+        if ($info) {
+            $nameArgs.DisplayVersion = $info.DisplayVersion
+            $nameArgs.Build = $info.CurrentBuild
+            if ($null -ne $info.UBR) { $nameArgs.Revision = [string]$info.UBR }
+            if ($info.BuildBranch) { $nameArgs.BranchUpper = ([string]$info.BuildBranch).ToUpperInvariant() }
         }
-        Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $output -Config $Config
-    }
-    else {
-        # 組 ISO 檔名所需的建置資訊已在步驟 6 讀出；任何失敗只記警告並退回舊格式，不中止整次執行
-        $nameArgs = @{ Timestamp = (Get-Date -Format 'yyyyMMdd-HHmmss'); Arch = $architecture; Languages = @($syncLanguages) }
-        try {
-            $info = $buildInfo.Info
-            if ($info) {
-                $nameArgs.DisplayVersion = $info.DisplayVersion
-                $nameArgs.Build = $info.CurrentBuild
-                if ($null -ne $info.UBR) { $nameArgs.Revision = [string]$info.UBR }
-                if ($info.BuildBranch) { $nameArgs.BranchUpper = ([string]$info.BuildBranch).ToUpperInvariant() }
-            }
-            if ($targets.Count -lt @($images).Count) { Write-WinMediaLog -Config $Config -Level Warning -Message ('只更新 {0}/{1} 個索引，檔名的建置號與 UBR 取自第一個目標索引，未更新的索引不含這些更新' -f $targets.Count, @($images).Count) }
-            if ($finalCount -gt 1) { $nameArgs.Edition = 'CLIENTMULTI' }
-            else {
-                $edition = @(Get-WinMediaIndexInfo -ImagePath $installWim -Config $Config)[0].EditionId
-                if ($edition) { $nameArgs.Edition = 'CLIENT' + ([string]$edition).ToUpperInvariant() }
-            }
-            $idwb = Join-Path -Path $sourcesDir -ChildPath 'idwbinfo.txt'
-            if ((Test-Path -LiteralPath $idwb) -and ((Get-Content -LiteralPath $idwb -Raw) -match '(?m)^\s*BuildType\s*=\s*(\w+)')) { $nameArgs.BuildType = $Matches[1] }
-            $isoName = New-WinMediaOutputName @nameArgs
-        }
-        catch {
-            Write-WinMediaLog -Config $Config -Level Warning -Message ('組 ISO 檔名失敗，改用預設名稱：{0}' -f $_.Exception.Message)
-            $isoName = 'WinMedia_{0}.iso' -f $nameArgs.Timestamp
-        }
-        $output = Join-Path -Path $Config.OutputDir -ChildPath $isoName
-        if ((Test-Path -LiteralPath $output) -and -not $Force) {
-            throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
-        }
-        # 開機檔依架構不同：x64 有 BIOS（etfsboot.com）與 UEFI（efisys.bin）；ARM64 媒體只有 UEFI，沒有 etfsboot.com
-        $efiBoot = Join-Path -Path $mediaDir -ChildPath 'efi\microsoft\boot\efisys.bin'
-        if (-not (Test-Path -LiteralPath $efiBoot)) { throw "找不到 UEFI 開機檔：$efiBoot（媒體目錄可能不完整）" }
-        if ($architecture -eq 'arm64') {
-            $bootData = '-bootdata:1#pEF,e,b"{0}"' -f $efiBoot
-        }
+        if ($targets.Count -lt @($images).Count) { Write-WinMediaLog -Config $Config -Level Warning -Message ('只更新 {0}/{1} 個索引，檔名的建置號與 UBR 取自第一個目標索引，未更新的索引不含這些更新' -f $targets.Count, @($images).Count) }
+        if ($finalCount -gt 1) { $nameArgs.Edition = 'CLIENTMULTI' }
         else {
-            $biosBoot = Join-Path -Path $mediaDir -ChildPath 'boot\etfsboot.com'
-            if (-not (Test-Path -LiteralPath $biosBoot)) { throw "找不到 BIOS 開機檔：$biosBoot（媒體目錄可能不完整）" }
-            $bootData = '-bootdata:2#p0,e,b"{0}"#pEF,e,b"{1}"' -f $biosBoot, $efiBoot
+            $edition = @(Get-WinMediaIndexInfo -ImagePath $installWim -Config $Config)[0].EditionId
+            if ($edition) { $nameArgs.Edition = 'CLIENT' + ([string]$edition).ToUpperInvariant() }
         }
-        # -o：去除重複檔案，與 convert-UUP 的 oscdimg 參數一致（對應參考腳本 convert-UUP.cmd 的 oscdimg 參數）
-        $burn = Invoke-WinMediaExternal -FilePath $oscdimg -ArgumentList @($bootData, '-o', '-u2', '-udfver102', '-m', $mediaDir, $output) -Config $Config
-        if ($burn.ExitCode -ne 0) {
-            throw "oscdimg 失敗，結束碼 $($burn.ExitCode)：$($burn.StdErr)"
+        $idwb = Join-Path -Path $sourcesDir -ChildPath 'idwbinfo.txt'
+        if ((Test-Path -LiteralPath $idwb) -and ((Get-Content -LiteralPath $idwb -Raw) -match '(?m)^\s*BuildType\s*=\s*(\w+)')) { $nameArgs.BuildType = $Matches[1] }
+        $isoName = New-WinMediaOutputName @nameArgs
+    }
+    catch {
+        Write-WinMediaLog -Config $Config -Level Warning -Message ('組 ISO 檔名失敗，改用預設名稱：{0}' -f $_.Exception.Message)
+        $isoName = 'WinMedia_{0}.iso' -f $nameArgs.Timestamp
+    }
+    $isEsd = $Config.OutputFormat -eq 'ESD'
+    switch ($plan.OutputForm) {
+        'Iso' {
+            $output = Join-Path -Path $Config.OutputDir -ChildPath $isoName
+            if ((Test-Path -LiteralPath $output) -and -not $Force) {
+                throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
+            }
+            # 開機檔依架構不同：x64 有 BIOS（etfsboot.com）與 UEFI（efisys.bin）；ARM64 媒體只有 UEFI，沒有 etfsboot.com
+            # 所有失敗檢查都在 ESD 匯出（會移除 install.wim）與 oscdimg 之前完成
+            $efiBoot = Join-Path -Path $mediaDir -ChildPath 'efi\microsoft\boot\efisys.bin'
+            if (-not (Test-Path -LiteralPath $efiBoot)) { throw "找不到 UEFI 開機檔：$efiBoot（媒體目錄可能不完整）" }
+            if ($architecture -eq 'arm64') {
+                $bootData = '-bootdata:1#pEF,e,b"{0}"' -f $efiBoot
+            }
+            else {
+                $biosBoot = Join-Path -Path $mediaDir -ChildPath 'boot\etfsboot.com'
+                if (-not (Test-Path -LiteralPath $biosBoot)) { throw "找不到 BIOS 開機檔：$biosBoot（媒體目錄可能不完整）" }
+                $bootData = '-bootdata:2#p0,e,b"{0}"#pEF,e,b"{1}"' -f $biosBoot, $efiBoot
+            }
+            # ESD 來源 WIM 只在 WorkDir 內轉成 install.esd；Keel 驗證映像數後才移除 install.wim，不寫到 OutputDir
+            if ($isEsd) { Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $installEsd -Config $Config }
+            # -o：去除重複檔案，與 convert-UUP 的 oscdimg 參數一致（對應參考腳本 convert-UUP.cmd 的 oscdimg 參數）
+            $burn = Invoke-WinMediaExternal -FilePath $oscdimg -ArgumentList @($bootData, '-o', '-u2', '-udfver102', '-m', $mediaDir, $output) -Config $Config
+            if ($burn.ExitCode -ne 0) {
+                throw "oscdimg 失敗，結束碼 $($burn.ExitCode)：$($burn.StdErr)"
+            }
         }
+        'Folder' {
+            $output = Join-Path -Path $Config.OutputDir -ChildPath ($isoName -replace '\.iso$', '')
+            # 不覆寫既有資料夾，即使指定 -Force（與 ISO 不同；刪除遞迴目錄的風險較高，見 Assert-WinMediaNoReparsePoint）
+            if (Test-Path -LiteralPath $output) {
+                throw "輸出資料夾已存在：$output（Folder 形式不覆寫既有資料夾，請改用其他 OutputDir 或刪除後重試）"
+            }
+            if ($isEsd) { Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $installEsd -Config $Config }
+            Invoke-WinMediaOperation -Category File -Operation 'CopyMedia' -Target $output -Config $Config -ScriptBlock {
+                Copy-Item -LiteralPath $mediaDir -Destination $output -Recurse
+            } | Out-Null
+        }
+        'Image' {
+            if ($isEsd) {
+                $output = Join-Path -Path $Config.OutputDir -ChildPath 'install.esd'
+                if ((Test-Path -LiteralPath $output) -and -not $Force) {
+                    throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
+                }
+                Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $output -Config $Config
+            }
+            else {
+                $output = Join-Path -Path $Config.OutputDir -ChildPath 'install.wim'
+                if ((Test-Path -LiteralPath $output) -and -not $Force) {
+                    throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
+                }
+                Invoke-WinMediaOperation -Category File -Operation 'MoveImage' -Target $output -Config $Config -ScriptBlock {
+                    Move-Item -LiteralPath $installWim -Destination $output -Force:$Force
+                } | Out-Null
+            }
+        }
+        default { throw "不支援的 OutputForm：$($plan.OutputForm)" }
     }
 
     # 步驟 12：成功後才清除工作子目錄；logs 保留

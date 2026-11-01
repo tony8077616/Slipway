@@ -27,7 +27,7 @@ Describe 'Invoke-WindowsMediaRefresh 前置檢查順序（Step 10a）' -Tag 'Uni
             Should -Throw '*找不到母檔*'
     }
 
-    It '沒有系統管理員權限時丟出原訊息，且不呼叫 UI 提示' {
+    It '沒有系統管理員權限時丟出原訊息' {
         Mock -ModuleName WinMediaRefresh -CommandName Test-WinMediaAdministrator -MockWith { $false }
         $iso = Join-Path -Path $TestDrive -ChildPath 'missing.iso'
         { Invoke-WindowsMediaRefresh -SourceIso $iso -Config $script:defaults -WorkDir (Join-Path -Path $TestDrive -ChildPath 'w') -OutputDir (Join-Path -Path $TestDrive -ChildPath 'out') } |

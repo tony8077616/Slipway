@@ -72,6 +72,24 @@ function Resolve-WinMediaMountOption {
     return $Config
 }
 
+function Resolve-WinMediaOutputPlan {
+    # 輸出形式矩陣（藍圖 F7）：空白的 OutputForm 一律為 Iso；只有 Iso 需要 oscdimg，只有 ESD 壓縮需要 wimlib
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$OutputFormat,
+        [AllowEmptyString()][string]$OutputForm = ''
+    )
+
+    if ($OutputFormat -notin 'WIM', 'ESD') { throw "不支援的 OutputFormat：$OutputFormat" }
+    $form = if ([string]::IsNullOrWhiteSpace($OutputForm)) { 'Iso' } else { $OutputForm }
+    return [pscustomobject]@{
+        OutputForm   = $form
+        NeedsOscdimg = ($form -eq 'Iso')
+        NeedsWimlib  = ($OutputFormat -eq 'ESD')
+    }
+}
+
 function Get-WinMediaFullPath {
     # 正規化路徑：去除 PowerShell 提供者前綴，依 PowerShell 位置展開相對路徑
     [CmdletBinding()]
@@ -577,4 +595,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir

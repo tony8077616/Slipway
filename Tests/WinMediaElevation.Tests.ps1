@@ -51,6 +51,11 @@ Describe 'Update-WindowsMedia.ps1 入口：網路檢查與 -WhatIf（Elevation�
             Should -Throw '*WorkDir 不支援網路路徑*'
     }
 
+    It 'SourceIso 為網路路徑時於提權前丟出中文訊息' {
+        { & $script:entry -SourceIso '\\server\share\x.iso' -WorkDir (Join-Path -Path $TestDrive -ChildPath 'w') -OutputDir (Join-Path -Path $TestDrive -ChildPath 'out') } |
+            Should -Throw '*SourceIso 不支援網路路徑*'
+    }
+
     It 'OutputDir 為網路路徑時丟出中文訊息' {
         { & $script:entry -SourceIso 'D:\x.iso' -WorkDir (Join-Path -Path $TestDrive -ChildPath 'w') -OutputDir '\\server\share\o' } |
             Should -Throw '*OutputDir 不支援網路路徑*'
