@@ -33,7 +33,9 @@
         [string]$MountDir,
         [string]$OutputDir,
         # 參數端先擋掉非法值（給出 PowerShell 的參數錯誤）；合法名單與預設值的權威定義在 Resolve-WinMediaDismLogLevel
-        [ValidateSet('Errors', 'Warnings', 'WarningsInfo', 'Debug')][string]$DismLogLevel
+        [ValidateSet('Errors', 'Warnings', 'WarningsInfo', 'Debug')][string]$DismLogLevel,
+        # 輸出形式覆寫 Config.OutputForm；未指定時沿用設定檔（空白 = 自動）
+        [ValidateSet('Iso', 'Folder', 'Image')][string]$OutputForm
     )
 
     $steps = @(
@@ -82,6 +84,9 @@
     if ($PSBoundParameters.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = $DismLogLevel }
     # 舊設定檔缺 DismLogLevel 時補預設並驗證（規則集中在 Keel 的 Resolve-WinMediaDismLogLevel）
     $Config.DismLogLevel = Resolve-WinMediaDismLogLevel -Config $Config
+    if ($PSBoundParameters.ContainsKey('OutputForm')) { $Config.OutputForm = $OutputForm }
+    # 新鍵補預設值並驗證（舊設定檔可能沒有）；OutputForm 由 Step 10 的輸出流程使用
+    $Config = Resolve-WinMediaMountOption -Config $Config
     # pwsh 7 下的 DISM 主機檢查（DismUseWindowsPowerShell 為關閉時中止）；開啟時於第一次 DISM 呼叫前先檢查、沒有才匯入
     Test-WinMediaDismHost -Provider $Config.DismProvider -Config $Config
     $Config.MountDir = Resolve-WinMediaMountDir -WorkDir $Config.WorkDir -MountDir $Config.MountDir
