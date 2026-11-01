@@ -13,6 +13,7 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'PSModules\Imaging
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'PSModules\Imaging\WinMediaWimlib.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'PSModules\Imaging\WinMediaEsd.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'PSModules\Imaging\WinMediaImage.psm1') -Force
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'PSModules\Imaging\WinMediaOptimize.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'PSModules\Imaging\WinMediaVirtualEdition.psm1') -Force
 
 # 專案專屬功能：每個功能一個模組，位於 Modules\

@@ -263,7 +263,8 @@ Describe 'ESD 轉換與輸出的 wimlib／DISM 分流（§2.4）' -Tag 'Unit' {
             $wim = Join-Path -Path $TestDrive -ChildPath 'src.wim'
             $esd = Join-Path -Path $TestDrive -ChildPath 'dst.esd'
             [System.IO.File]::WriteAllText($wim, 'x')
-            Mock Invoke-WinMediaWimlib { }
+            Mock Invoke-WinMediaWimlib { param($ArgumentList, $Config) $null = $Config; if ($ArgumentList[0] -eq 'export') { [System.IO.File]::WriteAllText($ArgumentList[3], 'esd') } }
+            Mock -ModuleName WinMediaEsd Get-WinMediaImageCount { 1 }
 
             Export-WinMediaEsd -SourceWim $wim -DestinationEsd $esd -Config @{ Wimlib = @{ Path = '' }; LogDir = $TestDrive }
 
