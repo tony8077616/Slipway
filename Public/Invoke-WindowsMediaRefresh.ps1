@@ -113,22 +113,36 @@
     $resetBaseOS = Resolve-WinMediaResetBaseOS -Config $Config
 
     # 步驟 1：前置檢查
-    $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    # 網路路徑於管理員檢查之前拒絕（需求第 6、10 項）；入口腳本已先做過一次，函式直接呼叫時仍需檢查
+    Assert-WinMediaLocalPath -Path $SourceIso -Name 'SourceIso'
+    Assert-WinMediaLocalPath -Path $Config.WorkDir -Name 'WorkDir'
+    Assert-WinMediaLocalPath -Path $Config.MountDir -Name 'MountDir'
+    Assert-WinMediaLocalPath -Path $Config.OutputDir -Name 'OutputDir'
+    if (-not [string]::IsNullOrWhiteSpace($Config.ScratchDirectory)) {
+        Assert-WinMediaScratchPath -ScratchDirectory $Config.ScratchDirectory -MountDir $Config.MountDir -WorkDir $Config.WorkDir
+    }
+    # 不在此提示提權：提權由入口腳本 Update-WindowsMedia.ps1 負責；函式只警告並丟出原訊息
+    if (-not (Test-WinMediaAdministrator)) {
+        if ([Environment]::UserInteractive) { Write-Warning '請以系統管理員身分重新執行，或改用 Update-WindowsMedia.ps1（會提示提權）。' }
         throw '需要系統管理員權限。'
     }
     # Defender 排除（選項 DefenderExclusions）：WorkDir 建立並套用 ACL 後才加入（狀態檔放 WorkDir 根目錄），finally 只還原本次新增的項目
     $defenderAdded = @()
     $defenderState = $null
     try {
-    $oneDrive = [string]$env:OneDrive
-    if ($oneDrive) {
-        if (Test-PathWithin -Child $Config.WorkDir -Parent $oneDrive) {
-            throw 'WorkDir 位於 OneDrive 內，請改用其他路徑（見 Config/Default.psd1）。'
-        }
-        if (Test-PathWithin -Child $Config.MountDir -Parent $oneDrive) {
-            throw 'MountDir 位於 OneDrive 內，掛載點不可由同步服務鎖定，請改用其他路徑。'
-        }
+    # 雲端同步資料夾只警告不中止：使用者可能已確認同步設定；掛載點位於同步資料夾時風險較高，文字不同
+    $cloud = Get-WinMediaCloudProvider -Path $Config.WorkDir
+    if ($cloud) { Write-Warning "WorkDir 位於 $cloud 同步資料夾內，同步服務可能鎖定或搬移工作檔，建議改用其他路徑（見 Config/Default.psd1）。" }
+    $cloud = Get-WinMediaCloudProvider -Path $Config.MountDir
+    if ($cloud) { Write-Warning "MountDir 位於 $cloud 同步資料夾內，掛載點可能被同步服務鎖定，建議改用其他路徑。" }
+    if (-not [string]::IsNullOrWhiteSpace($Config.ScratchDirectory)) {
+        $cloud = Get-WinMediaCloudProvider -Path $Config.ScratchDirectory
+        if ($cloud) { Write-Warning "ScratchDirectory 位於 $cloud 同步資料夾內，同步服務可能鎖定暫存檔，建議改用其他路徑。" }
+    }
+    # 掛載需要 NTFS；無法判斷檔案系統（UNC 等，已於前面拒絕）時不擋
+    $mountFileSystem = Get-WinMediaVolumeFileSystem -Path $Config.MountDir
+    if ($mountFileSystem -and $mountFileSystem -ne 'NTFS') {
+        throw "MountDir 必須位於 NTFS 磁碟區，目前為 $mountFileSystem：$($Config.MountDir)"
     }
     if (-not (Test-Path -LiteralPath $SourceIso -PathType Leaf)) {
         throw "找不到母檔：$SourceIso"

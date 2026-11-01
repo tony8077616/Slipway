@@ -29,6 +29,9 @@ $config.OperationLog = Join-Path -Path $config.LogDir -ChildPath 'OperationLog.t
 # 網路檢查先於提權與 UAC 提示（需求第 6、10 項）；預設 WorkDir 可能落在網路磁碟根，因此訊息會提示傳入 -WorkDir 與 -OutputDir
 Assert-WinMediaLocalPath -Path $WorkDir -Name 'WorkDir'
 Assert-WinMediaLocalPath -Path $OutputDir -Name 'OutputDir'
+Assert-WinMediaLocalPath -Path $SourceIso -Name 'SourceIso'
+if ($MountDir) { Assert-WinMediaLocalPath -Path $MountDir -Name 'MountDir' }
+if ($config.ContainsKey('ScratchDirectory') -and $config.ScratchDirectory) { Assert-WinMediaLocalPath -Path $config.ScratchDirectory -Name 'ScratchDirectory' }
 # -WhatIf 只列出步驟，不需要系統管理員權限，因此略過提權
 if (-not $WhatIfPreference -and -not (Test-WinMediaAdministrator)) {
     if (-not [Environment]::UserInteractive) { throw '需要系統管理員權限。' }
