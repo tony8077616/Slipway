@@ -3,7 +3,9 @@
 BeforeAll {
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaUpdate.psm1') -Force
     $script:mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
-    $script:text = Get-Content -LiteralPath $script:mainPath -Raw
+    # install 索引步驟已抽出至 Invoke-WinMediaInstallIndexUpdate.ps1；文字存在性檢查涵蓋兩個檔案
+    $script:fnPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1'
+    $script:text = (Get-Content -LiteralPath $script:mainPath -Raw) + (Get-Content -LiteralPath $script:fnPath -Raw)
     $script:ast = [System.Management.Automation.Language.Parser]::ParseFile($script:mainPath, [ref]$null, [ref]$null)
     $script:cmds = @($script:ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true))
     $script:config = @{ LogLevel = 'Info'; OperationLog = ''; DebugTrace = 0; LogFile = (Join-Path -Path $TestDrive -ChildPath 'wiring.log'); PackageDir = (Join-Path -Path $TestDrive -ChildPath 'pkg'); Download = @{ Method = 'WebRequest' } }
@@ -95,6 +97,14 @@ Describe 'ISO 開機參數（依架構分流，與 convert-UUP 對齊）' -Tag '
 }
 
 Describe 'install.wim 步驟順序（§5.9，重排後）' -Tag 'Unit' {
+    BeforeAll {
+        # 這一區段的指令全部位於 Invoke-WinMediaInstallIndexUpdate.ps1，暫時改用該檔的指令清單
+        $script:mainCmds = $script:cmds
+        $fnAst = [System.Management.Automation.Language.Parser]::ParseFile($script:fnPath, [ref]$null, [ref]$null)
+        $script:cmds = @($fnAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true))
+    }
+    AfterAll { $script:cmds = $script:mainCmds }
+
     It 'SSU → 語言包 → LCU（$lcuStage）→ cleanup → NetFx3 → .NET CU → Appx 移除' {
         $lang = Get-CommandOffset -Name 'Install-WinMediaLangFod'
         $lang | Should -BeGreaterThan -1
