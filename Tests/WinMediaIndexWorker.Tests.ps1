@@ -48,6 +48,9 @@ BeforeAll {
             LogFile      = (Join-Path -Path $TestDrive -ChildPath 'worker.log')
         }
         if (-not $Minimal) { $config.OptimizationTarget = '' }
+        # 不用 if 表達式：空陣列經過管線會被展開成 $null
+        $lxpItems = $null
+        if (-not $Minimal) { $lxpItems = [object[]]@() }
         @{
             ImagePath     = Join-Path -Path $TestDrive -ChildPath 'install.wim'
             Index         = 3
@@ -55,11 +58,11 @@ BeforeAll {
             mountSwitches = @{ CheckIntegrity = $true }
             ssu           = Join-Path -Path $TestDrive -ChildPath 'ssu.cab'
             lcuStage      = Join-Path -Path $TestDrive -ChildPath 'lcu'
-            langFod       = $null
+            langFod       = [pscustomobject]@{ LangPacks = @(); Fod = @(); Deferred = @() }
             dotNet        = Join-Path -Path $TestDrive -ChildPath 'dotnet.msu'
             appxList      = $null
-            storeSet      = $null
-            lxpItems      = if ($Minimal) { $null } else { @() }
+            storeSet      = [pscustomobject]@{ Frameworks = @(); Apps = @(); Hashes = @{} }
+            lxpItems      = $lxpItems
             driverSet     = [ordered]@{ ALL = @{ Path = (Join-Path -Path $TestDrive -ChildPath 'drv'); InfCount = 1; Targets = @('Install') } }
             forceUnsigned = $false
             resetBaseOS   = $false

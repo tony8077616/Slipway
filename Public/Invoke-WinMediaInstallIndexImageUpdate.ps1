@@ -44,7 +44,7 @@
         Write-WinMediaLog -Config $Config -Level Warning -Message 'install.wim cleanup 有待處理作業（0x800F0806），略過本次 cleanup；需開機完成後再處理。'
     }
     # 選用：WIMBoot 等最佳化目標（OptimizationTarget 為空時不呼叫）；值原樣傳給 DISM，不做驗證（藍圖 F13）
-    if (-not [string]::IsNullOrWhiteSpace($Config.OptimizationTarget)) {
+    if ($Config.ContainsKey('OptimizationTarget') -and -not [string]::IsNullOrWhiteSpace($Config.OptimizationTarget)) {
         Optimize-WinMediaImage -Path $mounted -OptimizationTarget $Config.OptimizationTarget -Config $Config | Out-Null
     }
     # 文件步驟 15：NetFx3 必須在 cleanup 之後、.NET CU 之前
@@ -56,7 +56,7 @@
     }
     if ($appxList) { Remove-WinMediaAppx -MountPath $mounted -AppxList $appxList -Config $Config | Out-Null }
     Install-WinMediaStoreApp -MountPath $mounted -Set $storeSet -Config $Config | Out-Null
-    if ($lxpItems.Count -gt 0) { Install-WinMediaLxp -MountPath $mounted -Lxp $lxpItems -Config $Config | Out-Null }
+    if ($null -ne $lxpItems -and @($lxpItems).Count -gt 0) { Install-WinMediaLxp -MountPath $mounted -Lxp $lxpItems -Config $Config | Out-Null }
     if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Install' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config | Out-Null }
     $kernelVersion = $null
     $info = $null

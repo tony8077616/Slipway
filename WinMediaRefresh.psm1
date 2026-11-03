@@ -33,6 +33,8 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'Modules\WinMediaD
 # Step 12a：install 索引更新（主流程的 install 迴圈呼叫）；與主流程同屬根模組範圍，故以 dot-source 載入
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaInstallIndexImageUpdate.ps1')
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1')
+# Step 12b-2：子程序啟動器（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Start-WinMediaIndexWorker.ps1')
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1')
 
 Export-ModuleMember -Function @(
