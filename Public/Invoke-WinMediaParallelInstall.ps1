@@ -43,7 +43,7 @@ function Invoke-WinMediaParallelInstall {
     $mediaTarget = $MediaDir
     $bootState = $BootEx
     foreach ($t in $syncTargets) {
-        Mount-WinMediaImage -ImagePath $InstallWim -Index $t -MountPath (Join-Path -Path $MountDir -ChildPath 'boot-src') -ReadOnly -Config $Config -Action {
+        Mount-WinMediaImage -ImagePath $InstallWim -Index $t -MountPath (Join-Path -Path $MountDir -ChildPath 'winre-src') -ReadOnly -Config $Config -Action {
             param($mounted)
             if ($t -eq $Targets[0]) {
                 Invoke-WinMediaOperation -Category File -Operation 'CopyXmlLite' -Target $xmlTarget -Config $Config -ScriptBlock {
