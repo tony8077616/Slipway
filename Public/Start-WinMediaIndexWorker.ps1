@@ -7,6 +7,10 @@
     )
 
     New-Item -ItemType Directory -Path $IndexDir -Force | Out-Null
+    # DISM 的 ScratchDirectory 必須已存在；父程序只建立自己的，子程序的 <scratch>\idxN 在此建立
+    if ($Job.ContainsKey('Config') -and $Job['Config'] -is [hashtable] -and $Job['Config'].ContainsKey('ScratchDirectory') -and -not [string]::IsNullOrWhiteSpace([string]$Job['Config']['ScratchDirectory'])) {
+        New-Item -ItemType Directory -Path $Job['Config']['ScratchDirectory'] -Force | Out-Null
+    }
     $jobPath = Join-Path -Path $IndexDir -ChildPath 'job.clixml'
     Export-Clixml -LiteralPath $jobPath -InputObject $Job -Depth 10
 
