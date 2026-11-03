@@ -54,7 +54,8 @@ BeforeAll {
         $p = [pscustomobject]@{ Id = $ProcId; StartTime = $StartTime; HasExited = $false; Log = $Log; KillError = $KillError; HandleError = [bool]$HandleError }
         $p | Add-Member -MemberType ScriptProperty -Name Handle -Value {
             $this.Log.Add("handle:$($this.Id)")
-            if ($this.HandleError) { throw [System.ComponentModel.Win32Exception]::new(5) }
+            # 無法開啟 Handle 以 $null 表示：PowerShell 的 ScriptProperty getter 會吞掉例外，無法模擬 .NET 的拋出
+            if ($this.HandleError) { return $null }
             [IntPtr]::Zero
         }
         $p | Add-Member -MemberType ScriptMethod -Name Kill -Value {
@@ -76,7 +77,7 @@ BeforeAll {
         $snap = $Snapshot
         $map = $Procs
         Mock -ModuleName WinMediaRefresh Get-CimInstance { param($ClassName) $null = $ClassName; $snap }.GetNewClosure()
-        Mock -ModuleName WinMediaRefresh Get-Process { param($Id) if ($map.ContainsKey([int]$Id)) { $map[[int]$Id] } else { throw "Cannot find a process with the process identifier $Id." } }.GetNewClosure()
+        Mock -ModuleName WinMediaRefresh Get-Process { param($Id) $key = [int]($Id | Select-Object -First 1); if ($map.ContainsKey($key)) { $map[$key] } else { throw "Cannot find a process with the process identifier $key." } }.GetNewClosure()
         Assert-MocksLive
         Invoke-InModule { param($r) Invoke-WinMediaParallelTreeKill -RootProcess $r } @($Root)
     }
@@ -152,7 +153,9 @@ Describe 'Parallel cleanup: tree kill' {
         $null = Invoke-TreeKill -Root $root -Snapshot $snap -Procs @{ 1003 = $c; 1005 = $g }
         $firstKill = $script:log.IndexOf('kill:1001')
         $firstKill | Should -BeGreaterThan -1
+        $script:log.IndexOf('handle:1003') | Should -BeGreaterThan -1
         ($script:log.IndexOf('handle:1003') -lt $firstKill) | Should -BeTrue
+        $script:log.IndexOf('handle:1005') | Should -BeGreaterThan -1
         ($script:log.IndexOf('handle:1005') -lt $firstKill) | Should -BeTrue
     }
 
