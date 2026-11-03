@@ -14,6 +14,11 @@ function Invoke-WinMediaParallelStage {
         $wim = Join-Path -Path $dir -ChildPath 'install.wim'
         $from = $SourceWim
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        # 上次執行殘留的結果或錯誤檔會被排程器誤讀為本次結果
+        foreach ($stale in @('result.clixml', 'error.txt')) {
+            $p = Join-Path -Path $dir -ChildPath $stale
+            if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
+        }
         # Export-WindowsImage 會附加到既有 WIM，殘留檔案必須先清掉
         if (Test-Path -LiteralPath $wim) { Remove-Item -LiteralPath $wim -Force }
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
