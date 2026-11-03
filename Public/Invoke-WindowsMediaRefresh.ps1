@@ -396,7 +396,14 @@
         foreach ($k in $Config.Keys) { $parallelConfig[$k] = $Config[$k] }
         $parallelConfig['MountDir'] = $mountDir
         $baseJob = @{ mountSwitches = $mountSwitches; Config = $parallelConfig; ssu = $ssu; lcuStage = $lcuStage; langFod = $langFod; dotNet = $dotNet; appxList = $appxList; storeSet = $storeSet; lxpItems = $lxpItems; driverSet = $driverSet; forceUnsigned = $forceUnsigned; resetBaseOS = $resetBaseOS; common = $common; winreWim = $winreWim }
-        Invoke-WinMediaParallelInstall -InstallWim $installWim -AllIndexes $indexes -Targets $targets -ParallelRoot (Join-Path -Path $workDir -ChildPath 'parallel') -MountDir $mountDir -BaseJob $baseJob -Config $parallelConfig -SourcesDir $sourcesDir -MediaDir $mediaDir -MaxConcurrent $parallelCount -InstallKernel $installKernel -BuildInfo $buildInfo -BootEx $bootEx -IsEsdSource:([bool]$isEsdSource)
+        $parallelDir = Join-Path -Path $workDir -ChildPath 'parallel'
+        # 登記前先守衛：來源或成品位於平行目錄之內時，登記的清空會刪除它們（與 L196、L202 同理）
+        if (Test-PathWithin -Child $SourceIso -Parent $parallelDir) { throw "來源映像位於平行工作目錄之內，會被清空：$SourceIso" }
+        if (Test-PathWithin -Child $Config.OutputDir -Parent $parallelDir) { throw "OutputDir 位於平行工作目錄之內，會被清空：$($Config.OutputDir)" }
+        Invoke-WinMediaOperation -Category File -Operation 'UseWorkDir' -Target $parallelDir -Config $Config -ScriptBlock {
+            Use-WinMediaWorkDir -Path $parallelDir
+        } | Out-Null
+        Invoke-WinMediaParallelInstall -InstallWim $installWim -AllIndexes $indexes -Targets $targets -ParallelRoot $parallelDir -MountDir $mountDir -BaseJob $baseJob -Config $parallelConfig -SourcesDir $sourcesDir -MediaDir $mediaDir -MaxConcurrent $parallelCount -InstallKernel $installKernel -BuildInfo $buildInfo -BootEx $bootEx -IsEsdSource:([bool]$isEsdSource)
     }
     else {
     foreach ($index in $targets) {

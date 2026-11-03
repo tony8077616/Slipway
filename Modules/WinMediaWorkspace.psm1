@@ -10,7 +10,7 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'WinMediaDefender.
 # 本工具掛載子資料夾的名稱（與 Invoke-WindowsMediaRefresh 的命名一致）；不在清單內的資料夾一律略過，即使它位於 MountDir 之下
 $script:OwnedChildPattern = '^(install-\d+|boot-\d+|winre|winre-src|spp-check)$'
 # WorkDir 內由本工具登記的子目錄；只有 -IncludeWorkDir 時才移除（Remove-WinMediaWorkDir 會檢查登記檔）
-$script:WorkSubDirs = @('media', 'winre', 'expand', 'lxp', 'update-stage')
+$script:WorkSubDirs = @('media', 'winre', 'expand', 'lxp', 'update-stage', 'parallel')
 
 function Get-WinMediaWorkspaceChildAction {
     # 狀態到動作的對應（純函式）：NeedsRemount 走 remount 分支；OK 與 Invalid 走卸載並捨棄；Unknown 只在空資料夾時移除，絕不遞迴刪除
