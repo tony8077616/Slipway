@@ -256,4 +256,21 @@ Describe 'Parallel merge: behaviour' {
         $removeIdx | Should -BeGreaterThan -1
         ($removeIdx -lt $firstExport) | Should -BeTrue -Because 'the old merged WIM must be removed before the first export'
     }
+
+    It 'Parallel merge stage removes stale result.clixml and error.txt from each target idx folder before its export' {
+        Assert-MergeFilePresent
+        Register-MergeMock -SourceInfo $script:srcInfo -MergedInfo @() -Ops $script:ops
+        $idx2 = Join-Path $script:mergeRoot 'idx2'
+        New-Item -ItemType Directory -Path $idx2 -Force | Out-Null
+        $res = Join-Path $idx2 'result.clixml'
+        $err = Join-Path $idx2 'error.txt'
+        New-Item -ItemType File -Path $res -Force | Out-Null
+        New-Item -ItemType File -Path $err -Force | Out-Null
+        Invoke-Stage -Targets @(2) -Root $script:mergeRoot -Source $script:src
+        $script:ops | Should -Contain "remove:$res"
+        $script:ops | Should -Contain "remove:$err"
+        $firstExport = $script:ops.FindIndex([Predicate[string]] { param($s) $s -like 'export:*' })
+        $resIdx = $script:ops.FindIndex([Predicate[string]] { param($s) $s -eq "remove:$res" })
+        ($resIdx -lt $firstExport) | Should -BeTrue -Because 'stale result files must be gone before the export starts'
+    }
 }
