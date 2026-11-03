@@ -20,6 +20,13 @@ BeforeAll {
     }
 }
 
+Describe 'Parallel: WorkSubDirs（Step 12c 登記）' -Tag 'Unit' {
+    It 'Parallel: WorkSubDirs includes the parallel root so -IncludeWorkDir can clear it' {
+        $dirs = & (Get-Module -Name WinMediaWorkspace) { $script:WorkSubDirs }
+        $dirs | Should -Contain 'parallel'
+    }
+}
+
 Describe 'Get-WinMediaWorkspaceChildAction（狀態到動作，Step 11）' -Tag 'Unit' {
     It '<Name>（狀態 <State>，空資料夾 <Empty>）→ <Expect>' -ForEach @(
         @{ Name = 'install-1'; State = 'OK'; Empty = $false; Expect = 'Clear' }
