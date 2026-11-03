@@ -72,7 +72,8 @@ BeforeAll {
         $ta = $ThrowAtSleep
         Mock -ModuleName WinMediaRefresh Start-WinMediaIndexWorker {
             param($Job, $IndexDir)
-            $i = [int]$Job.Index
+            $null = $Job
+            $i = [int]((Split-Path -Leaf $IndexDir) -replace '^idx', '')
             $l.Add("start:$i")
             $st.Dirs[$i] = $IndexDir
             $w[$i]
@@ -105,13 +106,13 @@ BeforeAll {
 
     function Get-RunJob {
         param([int]$Index, [string]$Root)
-        [pscustomobject]@{ Index = $Index; Job = @{ Index = $Index }; IndexDir = (Join-Path $Root "idx$Index"); MountPath = (Join-Path $Root "install-$Index") }
+        [pscustomobject]@{ Index = $Index; Job = @{ Index = 1 }; IndexDir = (Join-Path $Root "idx$Index"); MountPath = (Join-Path $Root "install-$Index") }
     }
 
     function Add-ResultFile {
         param([string]$IndexDir, [int]$Index)
         New-Item -ItemType Directory -Path $IndexDir -Force | Out-Null
-        Export-Clixml -LiteralPath (Join-Path $IndexDir 'result.clixml') -InputObject ([pscustomobject]@{ Index = $Index; KernelVersion = "10.0.26300.$Index"; BuildInfo = 'fake' })
+        Export-Clixml -LiteralPath (Join-Path $IndexDir 'result.clixml') -InputObject ([pscustomobject]@{ Index = 1; KernelVersion = "10.0.26300.$Index"; BuildInfo = 'fake' })
     }
 
     $script:cfg = @{ DismProvider = 'Inbox'; DismLogLevel = 'Errors'; LogLevel = 'Error'; LogFile = ''; OperationLog = ''; DebugTrace = 0 }
@@ -151,7 +152,7 @@ Describe 'Parallel schedule: safety gate' {
         $log = [System.Collections.Generic.List[string]]::new()
         $st = @{ Sleeps = 0; Base = [datetime]'2026-11-04 09:00:00'; Dirs = @{} }
         Register-ScheduleMock -Workers @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter 2 -Log $log) } -Log $log -State $st -TreeKillBody $script:quietTreeKill
-        $dir = Join-Path $TestDrive 'harness'
+        $dir = Join-Path $TestDrive 'idx1'
         $r = Invoke-InModule { param($d) $p = Start-WinMediaIndexWorker -Job @{ Index = 1 } -IndexDir $d; $null = $p.Handle; $h1 = $p.HasExited; $h2 = $p.HasExited; Start-Sleep -Milliseconds 1; @($h1, $h2, (Get-Date)) } @($dir)
         ($log -join ',') | Should -Be 'start:1,handle:1001,hasexited:1001,hasexited:1001,exit:1001,sleep'
         $r[0] | Should -BeFalse
