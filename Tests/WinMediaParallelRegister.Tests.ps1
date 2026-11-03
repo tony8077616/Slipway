@@ -30,12 +30,20 @@ Describe 'Parallel: refresh registers WorkDir\parallel only inside the parallel 
         $body | Should -Match '-ParallelRoot\s+\(?\s*Join-Path[^\n]*\$parallelDir|-ParallelRoot\s+\$parallelDir'
     }
 
-    It 'Parallel: the branch guards SourceIso and OutputDir against the parallel root before registering' {
+    It 'Parallel: the branch guards <Expr> against the parallel root before registering' -ForEach @(
+        @{ Expr = '$SourceIso' }
+        @{ Expr = '$Config.OutputDir' }
+        @{ Expr = '$mountDir' }
+        @{ Expr = '$Config.LogDir' }
+        @{ Expr = '$Config.LogFile' }
+        @{ Expr = '$Config.OperationLog' }
+        @{ Expr = '$Config.ScratchDirectory' }
+    ) {
         $body = $script:ifStmt.Clauses[0].Item2.Extent.Text
-        $guardIdx = $body.IndexOf('Test-PathWithin')
-        $regIdx = $body.IndexOf('Use-WinMediaWorkDir')
-        ($guardIdx -ge 0 -and $guardIdx -lt $regIdx) | Should -BeTrue -Because 'the guards must run before the folder is registered'
-        ([regex]::Matches($body, 'Test-PathWithin[^\r\n]*\$parallelDir')).Count | Should -BeGreaterOrEqual 2
+        $pattern = 'Test-PathWithin[^\r\n]*-Child\s+' + [regex]::Escape($Expr) + '\s+-Parent\s+\$parallelDir'
+        $m = [regex]::Match($body, $pattern)
+        $m.Success | Should -BeTrue -Because "no guard for $Expr against `$parallelDir"
+        $m.Index | Should -BeLessThan $body.IndexOf('Use-WinMediaWorkDir') -Because "the $Expr guard must run before the folder is registered"
     }
 
     It 'Parallel: the serial else branch does not mention the parallel root' {
