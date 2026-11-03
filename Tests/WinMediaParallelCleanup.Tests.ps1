@@ -262,6 +262,18 @@ Describe 'Parallel cleanup: tree kill' {
         $null = Invoke-TreeKill -Root $root -Snapshot $snap -Procs @{ 1003 = $c; 2001 = $outside }
         (@($script:log | Where-Object { $_ -match '2001' })).Count | Should -Be 0
     }
+
+    It 'Parallel tree kill does not walk descendants when the root start time is unknown' {
+        Assert-CleanupFilePresent
+        $root = Get-FakeProcess -ProcId 1001 -StartTime $script:t0 -Log $script:log
+        $root.StartTime = $null
+        $c = Get-FakeProcess -ProcId 1003 -StartTime $script:t0 -Log $script:log
+        $snap = @(Get-SnapRow 1003 1001 $script:t0)
+        $r = Invoke-TreeKill -Root $root -Snapshot $snap -Procs @{ 1003 = $c }
+        (@($script:log | Where-Object { $_ -match '^(handle|kill):1003$' })).Count | Should -Be 0
+        (@($script:log | Where-Object { $_ -eq 'kill:1001' })).Count | Should -Be 1
+        (@($r.Failed | Where-Object { $_ -match 'pid=1001' })).Count | Should -BeGreaterThan 0
+    }
 }
 
 Describe 'Parallel cleanup: mount cleanup' {
