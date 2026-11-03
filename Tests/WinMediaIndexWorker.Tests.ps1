@@ -351,6 +351,16 @@ Describe 'Parallel index worker：Start-WinMediaIndexWorker（Start-Process 已 
         $script:startArgs = $null
     }
 
+    It 'Parallel: 子程序的 ScratchDirectory（<scratch>\idxN）在啟動前由啟動器建立' {
+        (Test-Path -LiteralPath $script:starterFile -PathType Leaf) | Should -BeTrue -Because 'file missing: Start-WinMediaIndexWorker.ps1'
+        (& (Get-Module -Name WinMediaRefresh) { "$((Get-Command -Name Start-Process).CommandType)" }) | Should -Be 'Alias' -Because 'Start-Process must be mocked before the starter runs'
+        $dir = Join-Path -Path $TestDrive -ChildPath 'index-scratch'
+        $scratch = Join-Path -Path $TestDrive -ChildPath 'scratch\idx2'
+        $job = @{ ImagePath = 'X:\work\install.wim'; Index = 1; Config = @{ ScratchDirectory = $scratch } }
+        & (Get-Module -Name WinMediaRefresh) { param($j, $d) Start-WinMediaIndexWorker -Job $j -IndexDir $d | Out-Null } $job $dir
+        (Test-Path -LiteralPath $scratch -PathType Container) | Should -BeTrue -Because 'DISM needs the child scratch directory to exist before the worker mounts'
+    }
+
     It 'Parallel: 啟動器寫出 job.clixml，並以完整 powershell.exe 路徑只呼叫 Start-Process 一次' {
         (Test-Path -LiteralPath $script:starterFile -PathType Leaf) | Should -BeTrue -Because 'file missing: Start-WinMediaIndexWorker.ps1'
         (& (Get-Module -Name WinMediaRefresh) { "$((Get-Command -Name Start-Process).CommandType)" }) | Should -Be 'Alias' -Because 'Start-Process must be mocked before the starter runs'
