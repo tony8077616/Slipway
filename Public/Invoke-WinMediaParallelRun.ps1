@@ -17,7 +17,7 @@ function Get-WinMediaParallelErrorText {
     param([Parameter(Mandatory)][string]$IndexDir)
     $path = Join-Path -Path $IndexDir -ChildPath 'error.txt'
     try {
-        if (Test-Path -LiteralPath $path -PathType Leaf) { return (Get-Content -LiteralPath $path -Raw -Encoding UTF8).Trim() }
+        if (Test-Path -LiteralPath $path -PathType Leaf) { $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8; if ($null -eq $raw) { return '' }; return $raw.Trim() }
     }
     catch {
         return "讀取 error.txt 失敗：$($_.Exception.Message)"
@@ -84,8 +84,8 @@ function Invoke-WinMediaParallelRun {
                             $treeFailed = @()
                             try {
                                 $tk = Invoke-WinMediaParallelTreeKill -RootProcess $e.Proc
-                                $treeFailed = @($tk.Failed)
-                                foreach ($line in @($tk.Skipped) + @($tk.Failed)) {
+                                $treeFailed = @($tk.Failed | Where-Object { $null -ne $_ })
+                                foreach ($line in @((@($tk.Skipped) + @($tk.Failed)) | Where-Object { $null -ne $_ })) {
                                     Write-WinMediaLog -Config $Config -Level Warning -Message "樹狀終止（Index $($e.Job.Index)）：$line"
                                 }
                             }
@@ -120,6 +120,7 @@ function Invoke-WinMediaParallelRun {
                         $outcomes.Add((Get-WinMediaParallelOutcome -Job $e.Job -Ok $true -Result (Import-Clixml -LiteralPath $resultPath)))
                     }
                     catch {
+                        $stop = $true
                         $outcomes.Add((Get-WinMediaParallelOutcome -Job $e.Job -Ok $false -Reason "result.clixml 無法讀取：$($_.Exception.Message)" -ErrorText (Get-WinMediaParallelErrorText -IndexDir $e.Job.IndexDir) -Cleanup (Invoke-WinMediaParallelCleanupSafe -Job $e.Job -Config $Config)))
                     }
                     continue
@@ -139,7 +140,7 @@ function Invoke-WinMediaParallelRun {
         foreach ($e in @($active.ToArray())) {
             try {
                 $tk = Invoke-WinMediaParallelTreeKill -RootProcess $e.Proc
-                if (@($tk.Failed).Count -gt 0) {
+                if (@($tk.Failed | Where-Object { $null -ne $_ }).Count -gt 0) {
                     Write-WinMediaLog -Config $Config -Level Warning -Message "中斷時樹狀終止有失敗，標記為需手動清理：Index $($e.Job.Index)"
                     continue
                 }
