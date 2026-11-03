@@ -35,6 +35,8 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'Modules\WinMediaD
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1')
 # Step 12b-2：子程序啟動器（不匯出）
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Start-WinMediaIndexWorker.ps1')
+# Step 12c-1：平行處理計畫純函式（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Get-WinMediaParallelPlan.ps1')
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1')
 
 Export-ModuleMember -Function @(
