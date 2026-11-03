@@ -72,7 +72,7 @@ Describe 'install 索引更新抽出為函式（Step 12a，行為不變）' -Tag
 
     It '外層函式本體沒有自由變數（參數、區域賦值、自動變數以外的讀取）' {
         $outer = [System.Management.Automation.Language.Parser]::ParseFile($script:actionPath, [ref]$null, [ref]$null)
-        $fn = $outer.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+        $fn = $outer.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true); $fn | Should -Not -BeNullOrEmpty -Because '找不到外層函式的 FunctionDefinitionAst'
         $params = @($fn.Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
         $assigned = @($fn.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] }, $true) | ForEach-Object { $_.Left.VariablePath.UserPath })
         $auto = @('_', 'null', 'true', 'false', 'PSItem', 'args', 'input', 'this', 'Matches', 'PSBoundParameters', 'LASTEXITCODE', 'Error', 'PSCmdlet')
@@ -119,7 +119,7 @@ Describe 'install 索引映像部分（Step 12b-1，純抽取）' -Tag 'Unit' {
 
     It '映像函式本體沒有自由變數（FREE 守衛；序列路徑的動態作用域會讓未宣告的變數悄悄讀到主檔的值）' {
         $script:imageAst | Should -Not -BeNullOrEmpty -Because '映像函式檔不存在'
-        $fn = $script:imageAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+        $fn = $script:imageAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true); $fn | Should -Not -BeNullOrEmpty -Because '找不到映像函式的 FunctionDefinitionAst'
         $params = @($fn.Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
         $assigned = @($fn.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] }, $true) | ForEach-Object { $_.Left.VariablePath.UserPath })
         $auto = @('_', 'null', 'true', 'false', 'PSItem', 'args', 'input', 'this', 'Matches', 'PSBoundParameters', 'LASTEXITCODE', 'Error', 'PSCmdlet')
@@ -130,7 +130,7 @@ Describe 'install 索引映像部分（Step 12b-1，純抽取）' -Tag 'Unit' {
 
     It '映像函式不重新賦值任何參數（REASSIGN 守衛）' {
         $script:imageAst | Should -Not -BeNullOrEmpty -Because '映像函式檔不存在'
-        $fn = $script:imageAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+        $fn = $script:imageAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true); $fn | Should -Not -BeNullOrEmpty -Because '找不到映像函式的 FunctionDefinitionAst'
         $params = @($fn.Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
         $re = @($fn.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and $params -contains $n.Left.VariablePath.UserPath }, $true) | ForEach-Object { $_.Extent.Text })
         ($re -join ' | ') | Should -Be ''

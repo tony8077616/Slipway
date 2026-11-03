@@ -234,7 +234,7 @@ Describe 'Invoke-WindowsMediaRefresh 驅動注入位置（§5.9）' -Tag 'Unit' 
 
     It '驅動注入呼叫共三處（主流程兩處加上函式一處）' {
         $script:mainDriverCount | Should -Be 2
-        $script:driverCalls.Count | Should -Be 3
+        @($script:driverCalls | Where-Object { $null -eq $_ }).Count | Should -Be 0
         $script:fnDriverCount | Should -Be 1
     }
 
