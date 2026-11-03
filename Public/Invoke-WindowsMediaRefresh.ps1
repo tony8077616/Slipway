@@ -389,11 +389,22 @@
     $installKernel = @{ Version = $null }
     # 第一個目標索引的建置資訊（SOFTWARE hive：CurrentBuild、UBR、DisplayVersion、BuildBranch），供步驟 11 組 ISO 檔名；讀取失敗時保持 $null
     $buildInfo = @{ Info = $null }
+    # Step 12c-3b：MountParallelCount 大於 1 時改走平行路徑；1 維持下方的序列迴圈
+    $parallelCount = Get-WinMediaParallelCount -Requested ([int]$Config.MountParallelCount) -TargetCount $targets.Count
+    if ($parallelCount -gt 1) {
+        $parallelConfig = @{}
+        foreach ($k in $Config.Keys) { $parallelConfig[$k] = $Config[$k] }
+        $parallelConfig['MountDir'] = $mountDir
+        $baseJob = @{ mountSwitches = $mountSwitches; Config = $parallelConfig; ssu = $ssu; lcuStage = $lcuStage; langFod = $langFod; dotNet = $dotNet; appxList = $appxList; storeSet = $storeSet; lxpItems = $lxpItems; driverSet = $driverSet; forceUnsigned = $forceUnsigned; resetBaseOS = $resetBaseOS; common = $common; winreWim = $winreWim }
+        Invoke-WinMediaParallelInstall -InstallWim $installWim -AllIndexes $indexes -Targets $targets -ParallelRoot (Join-Path -Path $workDir -ChildPath 'parallel') -MountDir $mountDir -BaseJob $baseJob -Config $parallelConfig -SourcesDir $sourcesDir -MediaDir $mediaDir -MaxConcurrent $parallelCount -InstallKernel $installKernel -BuildInfo $buildInfo -BootEx $bootEx -IsEsdSource:([bool]$isEsdSource)
+    }
+    else {
     foreach ($index in $targets) {
         Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) @mountSwitches -Config $Config -Action {
             param($mounted)
         Invoke-WinMediaInstallIndexUpdate -mounted $mounted -ssu $ssu -lcuStage $lcuStage -langFod $langFod -dotNet $dotNet -appxList $appxList -storeSet $storeSet -lxpItems $lxpItems -driverSet $driverSet -forceUnsigned $forceUnsigned -resetBaseOS $resetBaseOS -common $common -IsFirstTarget:($index -eq $targets[0]) -sourcesDir $sourcesDir -winreWim $winreWim -isEsdSource:$isEsdSource -mediaDir $mediaDir -Config $Config -installKernel $installKernel -buildInfo $buildInfo -bootEx $bootEx
         } | Out-Null
+    }
     }
 
     # 步驟 7：虛擬版本（§2.7.4）；從已更新的 EnterpriseS 索引建立

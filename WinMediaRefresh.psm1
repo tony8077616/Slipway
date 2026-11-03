@@ -43,6 +43,8 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'Modules\WinMediaD
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaParallelRun.ps1')
 # Step 12c-3a：平行匯出與合併（不匯出）
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaParallelMerge.ps1')
+# Step 12c-3b：平行安裝索引的編排（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaParallelInstall.ps1')
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1')
 
 Export-ModuleMember -Function @(
