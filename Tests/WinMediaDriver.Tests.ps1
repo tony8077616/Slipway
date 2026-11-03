@@ -221,19 +221,21 @@ Describe 'Invoke-WindowsMediaRefresh 驅動注入位置（§5.9）' -Tag 'Unit' 
         $script:mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
         $script:ast = [System.Management.Automation.Language.Parser]::ParseFile($script:mainPath, [ref]$null, [ref]$null)
         $script:commands = @($script:ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true))
-        # Install 目標的驅動注入已抽出至 Invoke-WinMediaInstallIndexUpdate.ps1；依序為 WinRE（主流程）、Install（函式）、Boot（主流程）
+        # Install 目標的驅動注入已抽出至 Invoke-WinMediaInstallIndexImageUpdate.ps1；依序為 WinRE（主流程）、Install（函式）、Boot（主流程）
         $mainDriver = @($script:commands | Where-Object { $_.GetCommandName() -eq 'Install-WinMediaDriver' })
-        $fnPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1'
+        $fnPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexImageUpdate.ps1'
         $fnAst = [System.Management.Automation.Language.Parser]::ParseFile($fnPath, [ref]$null, [ref]$null)
         $fnDriver = @($fnAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Install-WinMediaDriver' }, $true))
         $script:siteCall = $script:commands | Where-Object { $_.GetCommandName() -eq 'Invoke-WinMediaInstallIndexUpdate' } | Select-Object -First 1
         $script:mainDriverCount = $mainDriver.Count
+        $script:fnDriverCount = $fnDriver.Count
         $script:driverCalls = @($mainDriver[0], $fnDriver[0], $mainDriver[1])
     }
 
     It '驅動注入呼叫共三處（主流程兩處加上函式一處）' {
         $script:mainDriverCount | Should -Be 2
         $script:driverCalls.Count | Should -Be 3
+        $script:fnDriverCount | Should -Be 1
     }
 
     It 'Install 目標的驅動注入位於 install 索引呼叫點，介於 WinRE 與 Boot 之間' {

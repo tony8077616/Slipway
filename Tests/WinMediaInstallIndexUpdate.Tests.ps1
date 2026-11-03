@@ -117,6 +117,25 @@ Describe 'install 索引映像部分（Step 12b-1，純抽取）' -Tag 'Unit' {
         @($used | Where-Object { $forbidden -contains $_ }).Count | Should -Be 0
     }
 
+    It '映像函式本體沒有自由變數（FREE 守衛；序列路徑的動態作用域會讓未宣告的變數悄悄讀到主檔的值）' {
+        $script:imageAst | Should -Not -BeNullOrEmpty -Because '映像函式檔不存在'
+        $fn = $script:imageAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+        $params = @($fn.Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+        $assigned = @($fn.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] }, $true) | ForEach-Object { $_.Left.VariablePath.UserPath })
+        $auto = @('_', 'null', 'true', 'false', 'PSItem', 'args', 'input', 'this', 'Matches', 'PSBoundParameters', 'LASTEXITCODE', 'Error', 'PSCmdlet')
+        $reads = @($fn.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] }, $true) | ForEach-Object { $_.VariablePath.UserPath } | Sort-Object -Unique)
+        $free = @($reads | Where-Object { $params -notcontains $_ -and $assigned -notcontains $_ -and $auto -notcontains $_ })
+        ($free -join ',') | Should -Be ''
+    }
+
+    It '映像函式不重新賦值任何參數（REASSIGN 守衛）' {
+        $script:imageAst | Should -Not -BeNullOrEmpty -Because '映像函式檔不存在'
+        $fn = $script:imageAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+        $params = @($fn.Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+        $re = @($fn.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and $params -contains $n.Left.VariablePath.UserPath }, $true) | ForEach-Object { $_.Extent.Text })
+        ($re -join ' | ') | Should -Be ''
+    }
+
     It '外層函式以同名變數呼叫映像函式，且傳入映像函式宣告的每個參數' {
         $outer = [System.Management.Automation.Language.Parser]::ParseFile($script:actionPath, [ref]$null, [ref]$null)
         $calls = @($outer.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-WinMediaInstallIndexImageUpdate' }, $true))

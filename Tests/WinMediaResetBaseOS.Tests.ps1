@@ -4,7 +4,7 @@ BeforeAll {
     Import-Module -Name (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'WinMediaRefresh.psd1') -Force
     $script:mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
     $script:ast = [System.Management.Automation.Language.Parser]::ParseFile($script:mainPath, [ref]$null, [ref]$null)
-    $script:fnAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1'), [ref]$null, [ref]$null)
+    $script:fnAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexImageUpdate.ps1'), [ref]$null, [ref]$null)
 }
 
 Describe 'Resolve-WinMediaResetBaseOS（ResetBaseOS 必須為布林）' -Tag 'Unit' {

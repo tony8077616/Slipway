@@ -5,7 +5,7 @@ BeforeAll {
     Import-Module -Name (Join-Path -Path $script:root -ChildPath 'WinMediaRefresh.psd1') -Force
     $script:config = Import-PowerShellDataFile -LiteralPath (Join-Path -Path $script:root -ChildPath 'Config\Default.psd1')
     $script:config.WorkDir = Join-Path -Path $TestDrive -ChildPath 'work'
-    $script:config.DismProvider = 'Native'
+    $script:config.DismProvider = 'Inbox'
     $script:config.OptimizationTarget = 'Full'
     $script:config.LogFile = Join-Path -Path $TestDrive -ChildPath 'img.log'
     $script:config.OperationLog = ''
@@ -39,7 +39,7 @@ Describe 'Invoke-WinMediaInstallIndexImageUpdate 行為（Step 12b-1，mock 版�
             Config        = $script:config
         }
         New-Item -ItemType Directory -Path $script:imgArgs.mounted -Force | Out-Null
-        Mock -ModuleName WinMediaRefresh Invoke-WinMediaDism { param($ScriptBlock) & $ScriptBlock }
+        Mock -ModuleName WinMediaRefresh Invoke-WinMediaDism { param($ScriptBlock) & $ScriptBlock; 'noise-dism' }
         Mock -ModuleName WinMediaRefresh Add-WindowsPackage { 'noise-add' }
         Mock -ModuleName WinMediaRefresh Repair-WindowsImage { 'noise-repair' }
         Mock -ModuleName WinMediaRefresh Add-WindowsDriver { throw '不應呼叫真實 DISM：Add-WindowsDriver' }
@@ -67,6 +67,9 @@ Describe 'Invoke-WinMediaInstallIndexImageUpdate 行為（Step 12b-1，mock 版�
         Should -Invoke -ModuleName WinMediaRefresh Remove-WinMediaAppx -Times 1 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Optimize-WinMediaImage -Times 1 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaBuildInfo -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Install-WinMediaDeferredFod -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Invoke-WinMediaOperation -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Invoke-WinMediaDism -Times 4 -Exactly
     }
 
     It '非第一個目標索引：KernelVersion 與 BuildInfo 為 $null，且不呼叫 Get-WinMediaBuildInfo' {
