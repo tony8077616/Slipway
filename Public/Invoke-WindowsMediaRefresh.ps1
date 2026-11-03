@@ -400,6 +400,11 @@
         # 登記前先守衛：來源或成品位於平行目錄之內時，登記的清空會刪除它們（與 L196、L202 同理）
         if (Test-PathWithin -Child $SourceIso -Parent $parallelDir) { throw "來源映像位於平行工作目錄之內，會被清空：$SourceIso" }
         if (Test-PathWithin -Child $Config.OutputDir -Parent $parallelDir) { throw "OutputDir 位於平行工作目錄之內，會被清空：$($Config.OutputDir)" }
+        if (Test-PathWithin -Child $mountDir -Parent $parallelDir) { throw "MountDir 位於平行工作目錄之內，會被清空：$mountDir" }
+        if (Test-PathWithin -Child $Config.LogDir -Parent $parallelDir) { throw "LogDir 位於平行工作目錄之內，會被清空：$($Config.LogDir)" }
+        if (Test-PathWithin -Child $Config.LogFile -Parent $parallelDir) { throw "LogFile 位於平行工作目錄之內，會被清空：$($Config.LogFile)" }
+        if (Test-PathWithin -Child $Config.OperationLog -Parent $parallelDir) { throw "OperationLog 位於平行工作目錄之內，會被清空：$($Config.OperationLog)" }
+        if ($Config.ContainsKey('ScratchDirectory') -and -not [string]::IsNullOrWhiteSpace($Config.ScratchDirectory) -and (Test-PathWithin -Child $Config.ScratchDirectory -Parent $parallelDir)) { throw "ScratchDirectory 位於平行工作目錄之內，會被清空：$($Config.ScratchDirectory)" }
         Invoke-WinMediaOperation -Category File -Operation 'UseWorkDir' -Target $parallelDir -Config $Config -ScriptBlock {
             Use-WinMediaWorkDir -Path $parallelDir
         } | Out-Null
