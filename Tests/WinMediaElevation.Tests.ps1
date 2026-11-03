@@ -20,6 +20,12 @@ Describe 'Get-WinMediaRelaunchArgument（提權重新啟動引數）' -Tag 'Unit
         $relaunch | Should -Contain '-Force:$true'
     }
 
+    It '-Confirm 與 -WhatIf 以 :$true 形式轉送（Update-WindowsMedia 直接傳入 PSBoundParameters）' {
+        $relaunch = Get-WinMediaRelaunchArgument -ScriptPath 'D:\Slipway\Update-WindowsMedia.ps1' -Bound @{ Confirm = [System.Management.Automation.SwitchParameter]$true; WhatIf = [System.Management.Automation.SwitchParameter]$true }
+        $relaunch | Should -Contain '-Confirm:$true'
+        $relaunch | Should -Contain '-WhatIf:$true'
+    }
+
     It '未設定的 switch 不傳' {
         $relaunch = Get-WinMediaRelaunchArgument -ScriptPath 'D:\Slipway\Update-WindowsMedia.ps1' -Bound @{ Force = [System.Management.Automation.SwitchParameter]$false }
         $relaunch | Should -Not -Contain '-Force:$true'
@@ -59,6 +65,20 @@ Describe 'Update-WindowsMedia.ps1 入口：網路檢查與 -WhatIf（Elevation�
     It 'OutputDir 為網路路徑時丟出中文訊息' {
         { & $script:entry -SourceIso 'D:\x.iso' -WorkDir (Join-Path -Path $TestDrive -ChildPath 'w') -OutputDir '\\server\share\o' } |
             Should -Throw '*OutputDir 不支援網路路徑*'
+    }
+
+    It '提權判斷的條件先排除 $WhatIfPreference（AST；腳本的 Import-Module -Force 會清掉 runtime mock）' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:entry, [ref]$null, [ref]$null)
+        $gates = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -match 'Test-WinMediaAdministrator' }, $true))
+        $gates.Count | Should -Be 1
+        $gates[0].Clauses[0].Item1.Extent.Text | Should -Match '-not \$WhatIfPreference'
+        $gateBody = $gates[0].Clauses[0].Item2.Extent
+        $starts = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Start-Process' }, $true))
+        $starts.Count | Should -BeGreaterThan 0
+        foreach ($s in $starts) {
+            $s.Extent.StartOffset | Should -BeGreaterOrEqual $gateBody.StartOffset
+            $s.Extent.EndOffset | Should -BeLessOrEqual $gateBody.EndOffset
+        }
     }
 
     It '-WhatIf 不觸發提權（不呼叫 Start-Process）' {

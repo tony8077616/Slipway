@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 
-# Step 12c-3b RED：平行安裝索引的編排（Public\Invoke-WinMediaParallelInstall.ps1，尚未存在）。
+# Step 12c-3b：平行安裝索引的編排（Public\Invoke-WinMediaParallelInstall.ps1）。RED 4c62887，GREEN 66708d9。
 # 排程器保持真實，只 mock Start-WinMediaIndexWorker（假程序＋寫入 result.clixml）。
 # 其餘 DISM、掛載、開機檔、合併與清理一律以 throw 或記錄動作的 mock 取代。
 

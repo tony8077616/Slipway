@@ -351,7 +351,7 @@ Describe 'Parallel index worker：Start-WinMediaIndexWorker（Start-Process 已 
         $script:startArgs = $null
     }
 
-    It 'Parallel: 子程序的 ScratchDirectory（<scratch>\idxN）在啟動前由啟動器建立' {
+    It 'Parallel: 子程序的 ScratchDirectory（scratch\idxN）在啟動前由啟動器建立' {
         (Test-Path -LiteralPath $script:starterFile -PathType Leaf) | Should -BeTrue -Because 'file missing: Start-WinMediaIndexWorker.ps1'
         (& (Get-Module -Name WinMediaRefresh) { "$((Get-Command -Name Start-Process).CommandType)" }) | Should -Be 'Alias' -Because 'Start-Process must be mocked before the starter runs'
         $dir = Join-Path -Path $TestDrive -ChildPath 'index-scratch'
