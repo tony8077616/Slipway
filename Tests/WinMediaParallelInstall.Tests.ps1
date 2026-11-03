@@ -191,4 +191,30 @@ Describe 'Parallel install: behaviour' {
         Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
         Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' }
     }
+
+    It 'sync mount leaf names are owned by the Step 11 cleanup tool (same pattern the cleanup uses)' {
+        Assert-InstallFilePresent
+        $wsText = [IO.File]::ReadAllText((Join-Path -Path $script:root -ChildPath 'Modules\WinMediaWorkspace.psm1'))
+        $m = [regex]::Match($wsText, "OwnedChildPattern\s*=\s*'([^']+)'")
+        $m.Success | Should -BeTrue -Because 'OwnedChildPattern not found in WinMediaWorkspace.psm1'
+        $pattern = $m.Groups[1].Value
+        $pattern | Should -Not -BeNullOrEmpty
+        'install-1' | Should -Match $pattern
+        'boot-src' | Should -Not -Match $pattern
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops
+        $leaves = [System.Collections.Generic.List[string]]::new()
+        $seen = $leaves
+        Mock -ModuleName WinMediaRefresh Mount-WinMediaImage {
+            param($ImagePath, $Index, $MountPath, $ReadOnly, $Action, $Config)
+            $null = $ImagePath, $Index, $ReadOnly, $Config
+            $seen.Add((Split-Path -Path $MountPath -Leaf))
+            & $Action $MountPath
+        }.GetNewClosure()
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
+        $leaves.Count | Should -BeGreaterThan 0
+        foreach ($leaf in $leaves) { $leaf | Should -Match $pattern }
+    }
 }
