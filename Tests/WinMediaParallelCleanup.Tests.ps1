@@ -263,6 +263,16 @@ Describe 'Parallel cleanup: tree kill' {
         (@($script:log | Where-Object { $_ -match '2001' })).Count | Should -Be 0
     }
 
+    It 'Parallel tree kill still kills the root when the snapshot fails and reports the snapshot in Failed' {
+        Assert-CleanupFilePresent
+        $root = Get-FakeProcess -ProcId 1001 -StartTime $script:t0 -Log $script:log
+        Mock -ModuleName WinMediaRefresh Get-CimInstance { throw 'wmi down' }
+        Assert-MocksLive
+        $r = Invoke-InModule { param($p) Invoke-WinMediaParallelTreeKill -RootProcess $p } @($root)
+        ($script:log -contains 'kill:1001') | Should -BeTrue
+        (@($r.Failed) -join ';') | Should -Match 'pid=1001 snapshot'
+    }
+
     It 'Parallel tree kill does not walk descendants when the root start time is unknown' {
         Assert-CleanupFilePresent
         $root = Get-FakeProcess -ProcId 1001 -StartTime $script:t0 -Log $script:log
