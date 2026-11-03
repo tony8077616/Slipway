@@ -24,7 +24,7 @@ BeforeAll {
 
     # 安全關卡：所有會被 mock 的名稱在模組範圍內都必須可解析；否則停止，避免真的啟動程序或睡眠
     function Assert-MocksLive {
-        foreach ($n in @('Start-WinMediaIndexWorker', 'Start-Process', 'Start-Sleep', 'Get-Date', 'Invoke-WinMediaParallelTreeKill', 'Invoke-WinMediaParallelMountCleanup')) {
+        foreach ($n in @('Start-WinMediaIndexWorker', 'Start-Process', 'Start-Sleep', 'Get-Date', 'Invoke-WinMediaParallelTreeKill', 'Invoke-WinMediaParallelMountCleanup', 'Write-WinMediaLog')) {
             $type = Invoke-InModule { param($x) (Get-Command -Name $x -ErrorAction Stop).CommandType } @($n)
             $type | Should -Be 'Alias' -Because "mock not live in WinMediaRefresh scope: $n"
         }
@@ -37,6 +37,7 @@ BeforeAll {
         Mock -ModuleName WinMediaRefresh Get-Date { throw 'unexpected call: Get-Date' }
         Mock -ModuleName WinMediaRefresh Invoke-WinMediaParallelTreeKill { throw 'unexpected call: Invoke-WinMediaParallelTreeKill' }
         Mock -ModuleName WinMediaRefresh Invoke-WinMediaParallelMountCleanup { throw 'unexpected call: Invoke-WinMediaParallelMountCleanup' }
+        Mock -ModuleName WinMediaRefresh Write-WinMediaLog { param($Config, $Level, $Message) $null = $Config, $Level, $Message }
     }
 
     # 假 worker 程序：Handle 讀取與 HasExited 讀取都寫入 log；HasExited 在讀取 ExitAfter 次後才為 true，Kill 會立即使其結束
@@ -63,11 +64,12 @@ BeforeAll {
 
     # 依 $Workers（Index → 假程序）設定 mock；$TreeKillBody 與 Invoke-WinMediaParallelTreeKill 的回傳同形
     function Register-ScheduleMock {
-        param([hashtable]$Workers, [System.Collections.Generic.List[string]]$Log, [hashtable]$State, [scriptblock]$TreeKillBody)
+        param([hashtable]$Workers, [System.Collections.Generic.List[string]]$Log, [hashtable]$State, [scriptblock]$TreeKillBody, [int]$ThrowAtSleep = 0)
         $w = $Workers
         $l = $Log
         $st = $State
         $tk = $TreeKillBody
+        $ta = $ThrowAtSleep
         Mock -ModuleName WinMediaRefresh Start-WinMediaIndexWorker {
             param($Job, $IndexDir)
             $i = [int]$Job.Index
@@ -78,6 +80,7 @@ BeforeAll {
         Mock -ModuleName WinMediaRefresh Start-Sleep {
             $st.Sleeps = $st.Sleeps + 1
             $l.Add('sleep')
+            if ($ta -gt 0 -and $st.Sleeps -eq $ta) { throw 'interrupted' }
             if ($st.Sleeps -gt 500) { throw 'poll loop did not terminate' }
         }.GetNewClosure()
         Mock -ModuleName WinMediaRefresh Get-Date { $st.Base.AddMinutes($st.Sleeps) }.GetNewClosure()
@@ -202,6 +205,19 @@ Describe 'Parallel schedule: behaviour' {
         }
     }
 
+    It 'Parallel schedule tree-kills and cleans the mount of a running worker when interrupted' {
+        Assert-RunFilePresent
+        $jobs = @(Get-RunJob -Index 1 -Root $script:runRoot)
+        $w = @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter $null -Log $script:log) }
+        Register-ScheduleMock -Workers $w -Log $script:log -State $script:st -TreeKillBody $script:killingTreeKill -ThrowAtSleep 2
+        { Invoke-Run -Jobs $jobs -Config $script:cfg -Max 1 } | Should -Throw -ExpectedMessage '*interrupted*'
+        (@($script:log | Where-Object { $_ -eq 'treekill:1001' })).Count | Should -Be 1
+        (@($script:log | Where-Object { $_ -eq 'mountcleanup:install-1' })).Count | Should -Be 1
+        $exitIdx = $script:log.IndexOf('exit:1001')
+        $exitIdx | Should -BeGreaterThan -1
+        ($script:log.IndexOf('mountcleanup:install-1') -gt $exitIdx) | Should -BeTrue -Because 'mount cleanup must follow the root exit'
+    }
+
     It 'Parallel schedule reads Handle before the first HasExited read of each worker' {
         Assert-RunFilePresent
         $jobs = @(1..2 | ForEach-Object { Get-RunJob -Index $_ -Root $script:runRoot })
@@ -220,12 +236,15 @@ Describe 'Parallel schedule: behaviour' {
     It 'Parallel schedule returns results sorted by Index and keeps index directories when workers exit in reverse order' {
         Assert-RunFilePresent
         $jobs = @(1..3 | ForEach-Object { Get-RunJob -Index $_ -Root $script:runRoot })
-        $w = @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter 3 -Log $script:log); 2 = (Get-FakeWorker -ProcId 1003 -ExitAfter 2 -Log $script:log); 3 = (Get-FakeWorker -ProcId 1005 -ExitAfter 1 -Log $script:log) }
+        $w = @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter 6 -Log $script:log); 2 = (Get-FakeWorker -ProcId 1003 -ExitAfter 3 -Log $script:log); 3 = (Get-FakeWorker -ProcId 1005 -ExitAfter 1 -Log $script:log) }
         Register-ScheduleMock -Workers $w -Log $script:log -State $script:st -TreeKillBody $script:quietTreeKill
         foreach ($j in $jobs) { Add-ResultFile -IndexDir $j.IndexDir -Index $j.Index }
         $res = @(Invoke-Run -Jobs $jobs -Config $script:cfg -Max 3)
         (@($res | ForEach-Object { $_.Index }) -join ',') | Should -Be '1,2,3'
         $res[0].KernelVersion | Should -Be '10.0.26300.1'
+        $script:log.IndexOf('exit:1005') | Should -BeGreaterThan -1
+        ($script:log.IndexOf('exit:1005') -lt $script:log.IndexOf('exit:1003')) | Should -BeTrue -Because 'the workers must exit in reverse order for this test to mean anything'
+        ($script:log.IndexOf('exit:1003') -lt $script:log.IndexOf('exit:1001')) | Should -BeTrue
         foreach ($j in $jobs) { (Test-Path -LiteralPath $j.IndexDir -PathType Container) | Should -BeTrue }
     }
 
@@ -266,10 +285,11 @@ Describe 'Parallel schedule: behaviour' {
     It 'Parallel schedule stops launching after a failure and lets running workers finish' {
         Assert-RunFilePresent
         $jobs = @(1..3 | ForEach-Object { Get-RunJob -Index $_ -Root $script:runRoot })
-        $w = @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter 1 -ExitCode 1 -Log $script:log); 2 = (Get-FakeWorker -ProcId 1003 -ExitAfter 4 -ExitCode 0 -Log $script:log); 3 = (Get-FakeWorker -ProcId 1005 -ExitAfter 1 -ExitCode 0 -Log $script:log) }
+        $w = @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter 2 -ExitCode 1 -Log $script:log); 2 = (Get-FakeWorker -ProcId 1003 -ExitAfter 4 -ExitCode 0 -Log $script:log); 3 = (Get-FakeWorker -ProcId 1005 -ExitAfter 1 -ExitCode 0 -Log $script:log) }
         Register-ScheduleMock -Workers $w -Log $script:log -State $script:st -TreeKillBody $script:quietTreeKill
         Add-ResultFile -IndexDir $jobs[1].IndexDir -Index 2
         { Invoke-Run -Jobs $jobs -Config $script:cfg -Max 2 } | Should -Throw -ExpectedMessage '*Index=1*'
+        (@($script:log | Where-Object { $_ -eq 'start:2' })).Count | Should -Be 1 -Because 'the second worker must be started before the failure is seen'
         (@($script:log | Where-Object { $_ -eq 'start:3' })).Count | Should -Be 0
         ($script:log -contains 'exit:1003') | Should -BeTrue -Because 'the running sibling must finish'
     }
