@@ -219,6 +219,38 @@ Describe 'Parallel schedule: behaviour' {
         ($script:log.IndexOf('mountcleanup:install-1') -gt $exitIdx) | Should -BeTrue -Because 'mount cleanup must follow the root exit'
     }
 
+    It 'Parallel schedule stops launching when a successful exit has an unreadable result.clixml' {
+        Assert-RunFilePresent
+        $jobs = @(1..2 | ForEach-Object { Get-RunJob -Index $_ -Root $script:runRoot })
+        $w = @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter 1 -ExitCode 0 -Log $script:log); 2 = (Get-FakeWorker -ProcId 1003 -ExitAfter 1 -ExitCode 0 -Log $script:log) }
+        Register-ScheduleMock -Workers $w -Log $script:log -State $script:st -TreeKillBody $script:quietTreeKill
+        New-Item -ItemType Directory -Path $jobs[0].IndexDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $jobs[0].IndexDir 'result.clixml') -Value 'not clixml' -Encoding UTF8
+        { Invoke-Run -Jobs $jobs -Config $script:cfg -Max 1 } | Should -Throw -ExpectedMessage '*Index=1*'
+        (@($script:log | Where-Object { $_ -eq 'start:2' })).Count | Should -Be 0 -Because 'a failure must stop new launches even when it is an unreadable result'
+    }
+
+    It 'Parallel schedule treats a TreeKill result with Failed null as no failure and still cleans the mount after exit' {
+        Assert-RunFilePresent
+        $jobs = @(Get-RunJob -Index 1 -Root $script:runRoot)
+        $w = @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter $null -Log $script:log) }
+        $nullFailedTreeKill = { param($RootProcess) $RootProcess.Kill(); [pscustomobject]@{ Killed = @($RootProcess.Id); Skipped = @(); Failed = $null } }
+        Register-ScheduleMock -Workers $w -Log $script:log -State $script:st -TreeKillBody $nullFailedTreeKill
+        { Invoke-Run -Jobs $jobs -Config $script:cfg -Max 1 -Timeout 1 -Grace 5 } | Should -Throw -ExpectedMessage '*timeout*'
+        (@($script:log | Where-Object { $_ -eq 'mountcleanup:install-1' })).Count | Should -Be 1
+    }
+
+    It 'Parallel schedule reports an empty error.txt as empty text and not as a read failure' {
+        Assert-RunFilePresent
+        $jobs = @(Get-RunJob -Index 1 -Root $script:runRoot)
+        $w = @{ 1 = (Get-FakeWorker -ProcId 1001 -ExitAfter 1 -ExitCode 1 -Log $script:log) }
+        Register-ScheduleMock -Workers $w -Log $script:log -State $script:st -TreeKillBody $script:quietTreeKill
+        New-Item -ItemType Directory -Path $jobs[0].IndexDir -Force | Out-Null
+        [IO.File]::WriteAllBytes((Join-Path $jobs[0].IndexDir 'error.txt'), [byte[]]@())
+        $err = { Invoke-Run -Jobs $jobs -Config $script:cfg -Max 1 } | Should -Throw -PassThru
+        $err.Exception.Message | Should -Not -Match '讀取 error.txt 失敗'
+    }
+
     It 'Parallel schedule reads Handle before the first HasExited read of each worker' {
         Assert-RunFilePresent
         $jobs = @(1..2 | ForEach-Object { Get-RunJob -Index $_ -Root $script:runRoot })
