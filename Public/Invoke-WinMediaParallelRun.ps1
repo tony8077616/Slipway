@@ -169,5 +169,5 @@ function Invoke-WinMediaParallelRun {
         throw ("平行子程序失敗（$($bad.Count) 個）：`n" + ($lines -join "`n"))
     }
 
-    @($outcomes | Sort-Object -Property Index | ForEach-Object { $_.Result })
+    @($outcomes | Sort-Object -Property Index | ForEach-Object { [pscustomobject]@{ Index = $_.Index; KernelVersion = $_.Result.KernelVersion; BuildInfo = $_.Result.BuildInfo } })
 }
