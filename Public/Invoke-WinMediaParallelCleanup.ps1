@@ -43,7 +43,13 @@ function Invoke-WinMediaParallelTreeKill {
     $queue = [System.Collections.Generic.Queue[object]]::new()
     $visited = [System.Collections.Generic.HashSet[int]]::new()
     [void]$visited.Add($rootId)
-    $queue.Enqueue([pscustomobject]@{ Id = $rootId; Created = $rootCreated })
+    # 根的建立時間未知時無法判斷孤兒，因此不走訪子孫；根仍會被終止（Handle 已固定）
+    if ($null -eq $rootCreated) {
+        $failed.Add("pid=$rootId root time unknown; descendants not walked")
+    }
+    else {
+        $queue.Enqueue([pscustomobject]@{ Id = $rootId; Created = $rootCreated })
+    }
 
     while ($queue.Count -gt 0) {
         $current = $queue.Dequeue()
