@@ -43,7 +43,7 @@ Describe 'Invoke-WindowsMediaRefresh: non-admin throws before any side effect (r
         Mock -ModuleName WinMediaRefresh Start-Process { throw 'tripwire: Start-Process' }
         Mock -ModuleName WinMediaRefresh Write-Warning { }
         Mock -ModuleName WinMediaRefresh Assert-WinMediaLocalPath { }
-        Mock -ModuleName WinMediaRefresh Resolve-WinMediaLogLocation { @{ LogDir = $Config.LogDir; OperationLog = $Config.OperationLog } }
+        Mock -ModuleName WinMediaRefresh Resolve-WinMediaLogLocation { param($Config) @{ LogDir = $Config.LogDir; OperationLog = $Config.OperationLog } }
     }
 
     It 'tripwires resolve as mocks (Alias) in the WinMediaRefresh scope before the call' {

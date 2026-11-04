@@ -74,6 +74,12 @@
     if ([string]::IsNullOrWhiteSpace($Config.WorkDir) -or -not [System.IO.Path]::IsPathRooted($Config.WorkDir)) {
         throw "WorkDir 必須為絕對路徑，目前為：'$($Config.WorkDir)'。"
     }
+    # 根目錄相對路徑（如 \WinMediaWork）會通過 IsPathRooted，須補成完整路徑（與提權參數相同的解析）
+    $Config.WorkDir = Get-WinMediaFullPath -Path $Config.WorkDir
+    if ($WorkDir) {
+        $Config.LogDir = Join-Path -Path $Config.WorkDir -ChildPath 'logs'
+        $Config.OperationLog = Join-Path -Path $Config.LogDir -ChildPath 'OperationLog.txt'
+    }
     # 設定檔可能沒有 LogDir／OperationLog；Invoke-WinMediaOperation 直接讀取 OperationLog，須在第一次呼叫前補齊
     $location = Resolve-WinMediaLogLocation -Config $Config
     $Config.LogDir = $location.LogDir
