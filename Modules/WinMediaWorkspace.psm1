@@ -46,6 +46,10 @@ function Invoke-WinMediaWorkspaceCleanup {
         [switch]$IncludeWorkDir
     )
 
+    # 根目錄相對路徑須先補成完整路徑，才會與主流程寫入 Defender 狀態的鍵與 AllowedPath 一致
+    $WorkDir = Get-WinMediaFullPath -Path $WorkDir
+    $MountDir = Get-WinMediaFullPath -Path $MountDir
+    $OutputDir = Get-WinMediaFullPath -Path $OutputDir
     # OutputDir 不得位於會被清理的目錄之下（與主流程的 Assert-WinMediaOutputDir 相同規則）
     Assert-WinMediaOutputDir -OutputDir $OutputDir -ProtectedDir (@($MountDir) + @($script:WorkSubDirs | ForEach-Object { Join-Path -Path $WorkDir -ChildPath $_ }))
     $clear = @()
