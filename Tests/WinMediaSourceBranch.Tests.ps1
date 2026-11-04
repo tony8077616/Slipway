@@ -84,7 +84,7 @@ Describe 'Invoke-WindowsMediaRefresh: 來源分支（ISO 無 install.wim／insta
     }
 
     It 'tripwires resolve as mocks (Alias) in the WinMediaRefresh scope before the call' {
-        foreach ($n in 'Test-WinMediaAdministrator', 'Mount-WinMediaSourceIso', 'Dismount-DiskImage', 'Convert-WinMediaEsdToWim', 'Copy-WinMediaEsdSource', 'Get-WinMediaIndexInfo', 'Add-WinMediaDefenderExclusion', 'Start-Process') {
+        foreach ($n in 'Test-WinMediaAdministrator', 'Mount-WinMediaSourceIso', 'Dismount-DiskImage', 'Convert-WinMediaEsdToWim', 'Copy-WinMediaEsdSource', 'Get-WinMediaIndexInfo', 'Add-WinMediaDefenderExclusion', 'Start-Process', 'Get-WinMediaCloudProvider', 'Initialize-WinMediaWorkRoot', 'Resolve-WinMediaDefenderStatePath', 'Restore-WinMediaDefenderExclusion', 'Resolve-WinMediaWimlib', 'Resolve-WinMediaOscdimg', 'Resolve-WinMediaAdk', 'Resolve-WinMediaDriverSet', 'Resolve-WinMediaAppxList', 'Resolve-WinMediaLangFodSet', 'Resolve-WinMediaStoreAppSet', 'Resolve-WinMediaLxp', 'Use-WinMediaWorkDir', 'Write-WinMediaLog', 'Remove-WinMediaExtraLanguage') {
             $type = Invoke-InModule { param($x) (Get-Command -Name $x -ErrorAction Stop).CommandType } @($n)
             $type | Should -Be 'Alias' -Because "mock not live in WinMediaRefresh scope: $n"
         }
