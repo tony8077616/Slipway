@@ -42,10 +42,12 @@ Describe 'Invoke-WindowsMediaRefresh: non-admin throws before any side effect (r
         Mock -ModuleName WinMediaRefresh Add-WinMediaDefenderExclusion { throw 'tripwire: Add-WinMediaDefenderExclusion' }
         Mock -ModuleName WinMediaRefresh Start-Process { throw 'tripwire: Start-Process' }
         Mock -ModuleName WinMediaRefresh Write-Warning { }
+        Mock -ModuleName WinMediaRefresh Assert-WinMediaLocalPath { }
+        Mock -ModuleName WinMediaRefresh Resolve-WinMediaLogLocation { @{ LogDir = $Config.LogDir; OperationLog = $Config.OperationLog } }
     }
 
     It 'tripwires resolve as mocks (Alias) in the WinMediaRefresh scope before the call' {
-        foreach ($n in 'Test-WinMediaAdministrator', 'Initialize-WinMediaWorkRoot', 'Mount-WinMediaSourceIso', 'Add-WinMediaDefenderExclusion', 'Start-Process') {
+        foreach ($n in 'Test-WinMediaAdministrator', 'Initialize-WinMediaWorkRoot', 'Mount-WinMediaSourceIso', 'Add-WinMediaDefenderExclusion', 'Start-Process', 'Assert-WinMediaLocalPath', 'Resolve-WinMediaLogLocation') {
             $type = Invoke-InModule { param($x) (Get-Command -Name $x -ErrorAction Stop).CommandType } @($n)
             $type | Should -Be 'Alias' -Because "mock not live in WinMediaRefresh scope: $n"
         }
@@ -59,5 +61,30 @@ Describe 'Invoke-WindowsMediaRefresh: non-admin throws before any side effect (r
         Should -Invoke -ModuleName WinMediaRefresh Mount-WinMediaSourceIso -Times 0 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Add-WinMediaDefenderExclusion -Times 0 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Start-Process -Times 0 -Exactly
+    }
+
+    It '根目錄相對的 WorkDir（\nonadmin-work）在管理員檢查之前正規化為完整路徑' {
+        $cfg = Get-NonAdminTestConfig -Root $script:root2
+        $cfg.WorkDir = '\nonadmin-work'
+        Push-Location -LiteralPath 'TestDrive:\'
+        try {
+            { Invoke-WindowsMediaRefresh -SourceIso $script:iso -Config $cfg } | Should -Throw '*需要系統管理員權限*'
+        }
+        finally {
+            Pop-Location
+        }
+        Should -Invoke -ModuleName WinMediaRefresh Assert-WinMediaLocalPath -Times 1 -Exactly -ParameterFilter { $Name -eq 'WorkDir' -and $Path -notlike '\*' -and $Path -like '*\nonadmin-work' }
+    }
+
+    It '以 -WorkDir 傳入根目錄相對路徑時，LogDir 也須為完整路徑' {
+        $cfg = Get-NonAdminTestConfig -Root $script:root2
+        Push-Location -LiteralPath 'TestDrive:\'
+        try {
+            { Invoke-WindowsMediaRefresh -SourceIso $script:iso -Config $cfg -WorkDir '\nonadmin-work' } | Should -Throw '*需要系統管理員權限*'
+        }
+        finally {
+            Pop-Location
+        }
+        Should -Invoke -ModuleName WinMediaRefresh Resolve-WinMediaLogLocation -Times 1 -Exactly -ParameterFilter { $Config.LogDir -notlike '\*' -and $Config.LogDir -like '*\nonadmin-work\logs' }
     }
 }
