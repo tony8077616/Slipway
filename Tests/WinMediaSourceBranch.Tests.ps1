@@ -37,7 +37,7 @@ BeforeAll {
     }
 }
 
-Describe 'Invoke-WindowsMediaRefresh: 來源分支（neither：ISO 內沒有 install.wim，也沒有 install.esd）' -Tag 'Unit' {
+Describe 'Invoke-WindowsMediaRefresh: 來源分支（ISO 無 install.wim／install.esd，以及 .esd 來源）' -Tag 'Unit' {
     BeforeEach {
         $script:root2 = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
         $isoDir = Join-Path -Path $script:root2 -ChildPath 'iso'
@@ -97,5 +97,25 @@ Describe 'Invoke-WindowsMediaRefresh: 來源分支（neither：ISO 內沒有 ins
         Should -Invoke -ModuleName WinMediaRefresh Convert-WinMediaEsdToWim -Times 0 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaIndexInfo -Times 0 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Dismount-DiskImage -Times 0 -Exactly
+    }
+    It '來源為 .esd 時：複製為 media\sources\install.esd，轉為 install.wim 一次，之後停在索引讀取' {
+        Mock -ModuleName WinMediaRefresh Copy-WinMediaEsdSource {
+            param($DestinationPath)
+            $dir = Split-Path -Path $DestinationPath -Parent
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Set-Content -LiteralPath $DestinationPath -Value 'esd'
+        }
+        Mock -ModuleName WinMediaRefresh Convert-WinMediaEsdToWim {
+            param($DestinationWim)
+            Set-Content -LiteralPath $DestinationWim -Value ''
+        }
+        $esd = Join-Path -Path $script:root2 -ChildPath 'src.esd'
+        Set-Content -LiteralPath $esd -Value 'esd'
+        $cfg = Get-SourceBranchConfig -Root $script:root2
+        { Invoke-WindowsMediaRefresh -SourceIso $esd -Config $cfg } | Should -Throw '*tripwire: Get-WinMediaIndexInfo*'
+        Should -Invoke -ModuleName WinMediaRefresh Copy-WinMediaEsdSource -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Convert-WinMediaEsdToWim -Times 1 -Exactly -ParameterFilter { $SourceEsd -like '*\media\sources\install.esd' -and $DestinationWim -like '*\media\sources\install.wim' }
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaIndexInfo -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Mount-WinMediaSourceIso -Times 0 -Exactly
     }
 }
