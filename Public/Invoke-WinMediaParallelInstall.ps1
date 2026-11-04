@@ -19,7 +19,7 @@ function Invoke-WinMediaParallelInstall {
     )
 
     $mountRoot = [IO.Path]::GetPathRoot($MountDir).ToUpperInvariant()
-    $freeSpace = @{ $mountRoot = [math]::Round(([IO.DriveInfo]$mountRoot).AvailableFreeSpace / 1GB, 2) }
+    $freeSpace = @{ $mountRoot = [math]::Round((Get-WinMediaDriveInfo -Root $mountRoot).AvailableFreeSpace / 1GB, 2) }
     foreach ($w in @(Get-WinMediaParallelSpaceWarning -Path @($MountDir) -Count $MaxConcurrent -EstimateGB $Config.MountSpaceEstimateGB -FreeSpaceGB $freeSpace)) {
         if ($w.Status -eq 'Low') {
             Write-WinMediaLog -Config $Config -Level Warning -Message "平行掛載的可用空間可能不足：$($w.Root) 需要約 $($w.RequiredGB) GB，可用 $($w.FreeGB) GB"

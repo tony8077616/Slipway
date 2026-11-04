@@ -171,6 +171,15 @@ function Get-WinMediaFullPath {
     }
 }
 
+function Get-WinMediaDriveInfo {
+    # DriveInfo 的唯一入口，便於測試以 mock 模擬磁碟機類型（例如網路磁碟機）；不接受 UNC
+    [CmdletBinding()]
+    [OutputType([System.IO.DriveInfo])]
+    param([Parameter(Mandatory)][string]$Root)
+
+    return [System.IO.DriveInfo]::new($Root)
+}
+
 function Test-WinMediaNetworkPath {
     # 網路路徑判斷：UNC（含 \\?\UNC\）或對應到網路磁碟機的磁碟區；本機的 \\?\C:\ 形式視為本機
     [CmdletBinding()]
@@ -185,7 +194,7 @@ function Test-WinMediaNetworkPath {
     $root = [System.IO.Path]::GetPathRoot($full)
     if ($root -notmatch '^[A-Za-z]:\\$') { return $false }
     try {
-        return ([System.IO.DriveInfo]::new($root)).DriveType -eq [System.IO.DriveType]::Network
+        return (Get-WinMediaDriveInfo -Root $root).DriveType -eq [System.IO.DriveType]::Network
     }
     catch {
         return $false
@@ -252,7 +261,7 @@ function Get-WinMediaVolumeFreeSpaceGB {
     param([Parameter(Mandatory)][string]$Path)
 
     try {
-        $drive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot((Get-WinMediaFullPath -Path $Path)))
+        $drive = Get-WinMediaDriveInfo -Root ([System.IO.Path]::GetPathRoot((Get-WinMediaFullPath -Path $Path)))
         return [math]::Round($drive.AvailableFreeSpace / 1GB, 2)
     }
     catch {
@@ -480,7 +489,7 @@ function Get-WinMediaVolumeFileSystem {
     [OutputType([string])]
     param([Parameter(Mandatory)][string]$Path)
 
-    try { return ([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($Path))).DriveFormat } catch { return $null }
+    try { return (Get-WinMediaDriveInfo -Root ([System.IO.Path]::GetPathRoot($Path))).DriveFormat } catch { return $null }
 }
 
 function Test-WinMediaWorkRootAclTrusted {
@@ -660,4 +669,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Get-WinMediaMountSwitch, Resolve-WinMediaScriptDefault, Copy-WinMediaEsdSource, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Get-WinMediaMountSwitch, Resolve-WinMediaScriptDefault, Copy-WinMediaEsdSource, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Get-WinMediaDriveInfo, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
