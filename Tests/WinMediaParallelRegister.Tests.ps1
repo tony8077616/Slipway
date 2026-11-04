@@ -36,7 +36,7 @@ Describe 'Parallel: the path guards run early, before any WorkDir registration (
         @{ Expr = 'Config.OperationLog' }
         @{ Expr = 'Config.ScratchDirectory' }
     ) {
-        $script:earlyIfs[0].Clauses[0].Item2.Extent.Text | Should -Match ([regex]::Escape($Expr))
+        $script:earlyIfs[0].Clauses[0].Item2.Extent.Text | Should -Match ('Test-PathWithin\s+-Child\s+\$' + [regex]::Escape($Expr) + '\s+-Parent\s+\$earlyParallelDir\b')
     }
 }
 
