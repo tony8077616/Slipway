@@ -115,7 +115,7 @@ Describe 'Parallel install: behaviour' {
         }
 
         function Invoke-InstallCase {
-            param([int[]]$Targets = @(2, 3), [bool]$IsEsd = $false, [hashtable]$Cfg, [hashtable]$Kernel, [hashtable]$Build, [hashtable]$Boot, [string]$Root)
+            param([int[]]$Targets = @(2, 3), [bool]$IsEsd = $false, [hashtable]$Cfg, [hashtable]$Kernel, [hashtable]$Build, [hashtable]$Boot, [string]$Root, [string]$MountOverride = '')
             Assert-InstallMocksLive
             $bj = @{
                 mountSwitches = @{}; ssu = 'ssu.msu'; lcuStage = 'stage'; langFod = $null; dotNet = $null; appxList = $null
@@ -123,9 +123,9 @@ Describe 'Parallel install: behaviour' {
                 common = @{}; winreWim = 'winre.wim'; Config = $Cfg
             }
             Invoke-InModule {
-                param($tg, $esd, $cfg, $k, $b, $bx, $bjob, $r)
-                Invoke-WinMediaParallelInstall -InstallWim (Join-Path -Path $r -ChildPath 'media\sources\install.wim') -AllIndexes @(1, 2, 3) -Targets $tg -ParallelRoot (Join-Path -Path $r -ChildPath 'parallel') -MountDir (Join-Path -Path $r -ChildPath 'mnt') -BaseJob $bjob -Config $cfg -SourcesDir (Join-Path -Path $r -ChildPath 'media\sources') -MediaDir (Join-Path -Path $r -ChildPath 'media') -MaxConcurrent 2 -InstallKernel $k -BuildInfo $b -BootEx $bx -IsEsdSource:$esd
-            } @($Targets, $IsEsd, $Cfg, $Kernel, $Build, $Boot, $bj, $Root)
+                param($tg, $esd, $cfg, $k, $b, $bx, $bjob, $r, $mo)
+                Invoke-WinMediaParallelInstall -InstallWim (Join-Path -Path $r -ChildPath 'media\sources\install.wim') -AllIndexes @(1, 2, 3) -Targets $tg -ParallelRoot (Join-Path -Path $r -ChildPath 'parallel') -MountDir $(if ($mo) { $mo } else { Join-Path -Path $r -ChildPath 'mnt' }) -BaseJob $bjob -Config $cfg -SourcesDir (Join-Path -Path $r -ChildPath 'media\sources') -MediaDir (Join-Path -Path $r -ChildPath 'media') -MaxConcurrent 2 -InstallKernel $k -BuildInfo $b -BootEx $bx -IsEsdSource:$esd
+            } @($Targets, $IsEsd, $Cfg, $Kernel, $Build, $Boot, $bj, $Root, $MountOverride)
         }
     }
 
@@ -294,6 +294,38 @@ Describe 'Parallel install: behaviour' {
         { Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root } | Should -Not -Throw
         Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaDriveInfo -Times 1 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { @($FreeSpaceGB.Keys | Where-Object { $null -eq $FreeSpaceGB[$_] }).Count -ge 1 }
+    }
+
+    It 'staging size comes from the real install.wim size (4 GB x 3 copies = 12 GB) and feeds the same-drive combined check' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops -SpaceLow $false
+        $wim = Join-Path -Path $root -ChildPath 'media\sources\install.wim'
+        New-Item -ItemType Directory -Path (Split-Path -Parent $wim) -Force | Out-Null
+        New-Item -ItemType File -Path $wim -Force | Out-Null
+        Mock -ModuleName WinMediaRefresh Get-Item -ParameterFilter { $LiteralPath -like '*install.wim' } { [pscustomobject]@{ Length = [int64]4GB } }
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 1 -and $EstimateGB -eq 72 }
+    }
+
+    It 'different-drive staging root (else branch): mount check is 2 x 30 GB, staging check is the 5 GB staging estimate' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops -SpaceLow $false
+        Mock -ModuleName WinMediaRefresh Get-WinMediaParallelStagingGB { 5 }
+        Mock -ModuleName WinMediaRefresh Get-WinMediaDriveInfo { [pscustomobject]@{ AvailableFreeSpace = [int64]100GB } }
+        $testRoot = [IO.Path]::GetPathRoot($TestDrive)
+        $other = [IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and $_.Name -ne $testRoot } | Select-Object -First 1
+        $script:absentRoot = ([string]$other.Name) + 'mnt-absent'
+        $mountOverride = $script:absentRoot
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root -MountOverride $mountOverride
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 2 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 2 -and $EstimateGB -eq 30 -and @($Path)[0] -eq $script:absentRoot }
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 1 -and $EstimateGB -eq 5 -and @($Path)[0] -like '*\parallel' }
     }
 
     It 'sync mount leaf names are owned by the Step 11 cleanup tool (same pattern the cleanup uses)' {
