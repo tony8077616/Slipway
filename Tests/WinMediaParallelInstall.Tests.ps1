@@ -43,6 +43,9 @@ Describe 'Parallel install: static' {
         $ifs[0].ElseClause.Extent.Text | Should -Match 'Invoke-WinMediaInstallIndexUpdate'
         $ifs[0].ElseClause.Extent.Text | Should -Not -Match 'Invoke-WinMediaParallelInstall'
     }
+    It 'Parallel install: the mock gate rejects names that are not mocked (Function is not enough)' {
+        { Assert-InstallMocksLive } | Should -Throw
+    }
 }
 
 Describe 'Parallel install: behaviour' {
