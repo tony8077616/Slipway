@@ -30,6 +30,15 @@ function Invoke-WinMediaParallelInstall {
     $planned = @(Get-WinMediaParallelJob -BaseJob $BaseJob -Targets $Targets -ParallelRoot $ParallelRoot)
     $jobs = @($planned | ForEach-Object { [pscustomobject]@{ Index = $_.OriginalIndex; IndexDir = $_.IndexDir; MountPath = $_.Job.MountPath; Job = $_.Job } })
     $results = @(Invoke-WinMediaParallelRun -Jobs $jobs -Config $Config -MaxConcurrent $MaxConcurrent)
+    # 只在全部成功後清理：失敗時會先丟例外，保留各索引的暫存目錄供診斷
+    foreach ($j in $jobs) {
+        $jc = $j.Job.Config
+        if (-not $jc.ContainsKey('ScratchDirectory') -or [string]::IsNullOrWhiteSpace([string]$jc['ScratchDirectory'])) { continue }
+        $sd = [string]$jc['ScratchDirectory']
+        if ((Split-Path -Path $sd -Leaf) -notmatch '^idx\d+$' -or -not (Test-Path -LiteralPath $sd -PathType Container)) { continue }
+        if (@(Get-ChildItem -LiteralPath $sd -Force).Count -eq 0) { Remove-Item -LiteralPath $sd -Force }
+        else { Write-WinMediaLog -Config $Config -Level Warning -Message "平行掛載的暫存目錄非空，保留：$sd" }
+    }
     Invoke-WinMediaParallelMerge -SourceWim $InstallWim -AllIndexes $AllIndexes -Targets $Targets -ParallelRoot $ParallelRoot -Config $Config
 
     $first = @($results | Where-Object { $_.Index -eq $Targets[0] })[0]
