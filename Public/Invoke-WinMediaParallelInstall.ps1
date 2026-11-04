@@ -26,7 +26,13 @@ function Invoke-WinMediaParallelInstall {
     }
     $installWimGB = if (Test-Path -LiteralPath $InstallWim -PathType Leaf) { [math]::Round((Get-Item -LiteralPath $InstallWim).Length / 1GB, 2) } else { 0 }
     $stagingGB = Get-WinMediaParallelStagingGB -Targets $Targets -InstallWimGB $installWimGB
-    $spaceWarnings = @(Get-WinMediaParallelSpaceWarning -Path @($MountDir) -Count $MaxConcurrent -EstimateGB $Config.MountSpaceEstimateGB -FreeSpaceGB $freeSpace) + @(Get-WinMediaParallelSpaceWarning -Path @($ParallelRoot) -Count 1 -EstimateGB $stagingGB -FreeSpaceGB $freeSpace)
+    if ($mountRoot -eq $stagingRoot) {
+        # 同一磁碟：掛載與暫存共用剩餘空間，需求加總成一次檢查
+        $spaceWarnings = @(Get-WinMediaParallelSpaceWarning -Path @($MountDir) -Count 1 -EstimateGB ([double]($MaxConcurrent * $Config.MountSpaceEstimateGB) + $stagingGB) -FreeSpaceGB $freeSpace)
+    }
+    else {
+        $spaceWarnings = @(Get-WinMediaParallelSpaceWarning -Path @($MountDir) -Count $MaxConcurrent -EstimateGB $Config.MountSpaceEstimateGB -FreeSpaceGB $freeSpace) + @(Get-WinMediaParallelSpaceWarning -Path @($ParallelRoot) -Count 1 -EstimateGB $stagingGB -FreeSpaceGB $freeSpace)
+    }
     foreach ($w in $spaceWarnings) {
         if ($w.Status -eq 'Low') {
             Write-WinMediaLog -Config $Config -Level Warning -Message "平行掛載的可用空間可能不足：$($w.Root) 需要約 $($w.RequiredGB) GB，可用 $($w.FreeGB) GB"

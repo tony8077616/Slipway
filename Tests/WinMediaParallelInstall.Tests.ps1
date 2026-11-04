@@ -258,16 +258,15 @@ Describe 'Parallel install: behaviour' {
         Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' }
     }
 
-    It 'low staging space (idx WIMs plus merged.wim) logs its own warning, separate from the mount drive' {
+    It 'low combined space on a shared drive (mount plus staging) logs one warning' {
         Assert-InstallFilePresent
         $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
         $ops = [System.Collections.Generic.List[string]]::new()
         Register-InstallMock -Ops $ops -SpaceLow $false
         Mock -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning {
             param($Path, $Count, $EstimateGB, $FreeSpaceGB)
-            $null = $Count, $EstimateGB, $FreeSpaceGB
-            $isStaging = (@($Path) -join '') -notlike '*\mnt*'
-            [pscustomobject]@{ Root = 'D:\'; RequiredGB = 12; FreeGB = 1; Status = $(if ($isStaging) { 'Low' } else { 'Ok' }) }
+            $null = $Path, $Count, $EstimateGB, $FreeSpaceGB
+            [pscustomobject]@{ Root = 'D:\'; RequiredGB = 72; FreeGB = 1; Status = 'Low' }
         }
         $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
         Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
