@@ -160,3 +160,29 @@ Describe 'Clear-WindowsMediaWorkspace.ps1（根目錄腳本）' -Tag 'Unit' {
         $cleanup | Should -Match $pattern
     }
 }
+Describe 'Invoke-WinMediaWorkspaceCleanup：根目錄相對 WorkDir（8a60680 回歸）' -Tag 'Unit' {
+    It '根目錄相對的 WorkDir 在查 Defender 狀態檔與 AllowedPath 前已正規化為完整路徑' {
+        $f = Get-WorkspaceFixture
+        $rel = $f.WorkDir.Substring($TestDrive.TrimEnd('\').Length)
+        $stateFile = Join-Path -Path $f.Base -ChildPath 'state-hash.json'
+        Set-Content -LiteralPath $stateFile -Value '[]' -Encoding ASCII
+        Mock -ModuleName WinMediaWorkspace -CommandName Resolve-WinMediaDefenderStatePath { Join-Path -Path $f.Base -ChildPath 'state-hash.json' }
+        Mock -ModuleName WinMediaWorkspace -CommandName Restore-WinMediaDefenderExclusion { }
+        Push-Location -LiteralPath 'TestDrive:\'
+        try {
+            Invoke-WinMediaWorkspaceCleanup -MountDir $f.MountDir -WorkDir $rel -OutputDir $f.OutputDir -Config $f.Config -Confirm:$false
+        }
+        finally {
+            Pop-Location
+        }
+        Should -Invoke -ModuleName WinMediaWorkspace -CommandName Resolve-WinMediaDefenderStatePath -Times 1 -Exactly -ParameterFilter { $WorkDir -eq $f.WorkDir }
+        Should -Invoke -ModuleName WinMediaWorkspace -CommandName Restore-WinMediaDefenderExclusion -Times 1 -Exactly -ParameterFilter { @($AllowedPath) -contains $f.WorkDir }
+    }
+
+    It 'Defender 狀態檔鍵不變：D:\WinMediaWork 的鍵為 UTF-8 大寫路徑 SHA-256 的前 16 碼（與既有檔案相容）' {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try { $hash = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes('D:\WINMEDIAWORK')) } finally { $sha.Dispose() }
+        $key = (-join ($hash | ForEach-Object { $_.ToString('x2') })).Substring(0, 16)
+        Resolve-WinMediaDefenderStatePath -WorkDir 'D:\WinMediaWork' | Should -Match ([regex]::Escape($key) + '\.json$')
+    }
+}
