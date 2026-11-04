@@ -13,7 +13,7 @@ BeforeAll {
         & (Get-Module -Name WinMediaRefresh) $Script @ArgList
     }
 
-    function New-NonAdminConfig {
+    function Get-NonAdminTestConfig {
         param([string]$Root)
         $cfg = Import-PowerShellDataFile -LiteralPath (Join-Path -Path $script:root -ChildPath 'Config\Default.psd1')
         $cfg.WorkDir = Join-Path -Path $Root -ChildPath 'work'
@@ -52,7 +52,7 @@ Describe 'Invoke-WindowsMediaRefresh: non-admin throws before any side effect (r
     }
 
     It '非管理員時丟出中文訊息，且 L129 之後的副作用命令都未被呼叫' {
-        $cfg = New-NonAdminConfig -Root $script:root2
+        $cfg = Get-NonAdminTestConfig -Root $script:root2
         { Invoke-WindowsMediaRefresh -SourceIso $script:iso -Config $cfg } | Should -Throw '*需要系統管理員權限*'
         Should -Invoke -ModuleName WinMediaRefresh Test-WinMediaAdministrator -Times 1 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Initialize-WinMediaWorkRoot -Times 0 -Exactly
