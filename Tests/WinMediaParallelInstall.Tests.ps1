@@ -278,9 +278,10 @@ Describe 'Parallel install: behaviour' {
         $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
         $ops = [System.Collections.Generic.List[string]]::new()
         Register-InstallMock -Ops $ops -SpaceLow $false
+        Mock -ModuleName WinMediaRefresh Get-WinMediaParallelStagingGB { 5 }
         $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
         Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
-        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 1 -and $EstimateGB -eq 65 }
     }
 
     It 'sync mount leaf names are owned by the Step 11 cleanup tool (same pattern the cleanup uses)' {
