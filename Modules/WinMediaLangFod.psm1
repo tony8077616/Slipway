@@ -82,10 +82,11 @@ function Install-WinMediaDeferredFod {
     )
 
     if (-not $PSCmdlet.ShouldProcess($MountPath, '注入 cleanup 後的 FoD')) { return }
+    $common = Get-WinMediaDismCommonParameter -Config $Config
     foreach ($package in @($Set.Deferred)) {
         Write-WinMediaLog -Config $Config -Level Info -Message "注入 cleanup 後的 FoD：$(Split-Path -Path $package -Leaf)"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsPackage -Path $MountPath -PackagePath $package -LogLevel $Config.DismLogLevel | Out-Null
+            Add-WindowsPackage -Path $MountPath -PackagePath $package @common -LogLevel $Config.DismLogLevel | Out-Null
         } | Out-Null
     }
 }
@@ -100,11 +101,12 @@ function Install-WinMediaLangFod {
     )
 
     if (-not $PSCmdlet.ShouldProcess($MountPath, '注入語言包與 FoD')) { return }
+    $common = Get-WinMediaDismCommonParameter -Config $Config
 
     foreach ($package in @($Set.LangPacks) + @($Set.Fod)) {
         Write-WinMediaLog -Config $Config -Level Info -Message "注入語言包／FoD：$(Split-Path -Path $package -Leaf)"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsPackage -Path $MountPath -PackagePath $package -LogLevel $Config.DismLogLevel | Out-Null
+            Add-WindowsPackage -Path $MountPath -PackagePath $package @common -LogLevel $Config.DismLogLevel | Out-Null
         } | Out-Null
     }
 }

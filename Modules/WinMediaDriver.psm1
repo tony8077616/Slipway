@@ -62,12 +62,13 @@ function Install-WinMediaDriver {
         [Parameter(Mandatory)][hashtable]$Config
     )
 
+    $common = Get-WinMediaDismCommonParameter -Config $Config
     foreach ($state in $DriverSet.Keys) {
         if (-not $DriverSet[$state].Targets[$Target]) { continue }
         $driverPath = $DriverSet[$state].Path
         Write-WinMediaLog -Config $Config -Level Verbose -Message "注入驅動：$state → $Target（掛載點 $MountPath，ForceUnsigned=$ForceUnsigned）"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsDriver -Path $MountPath -Driver $driverPath -Recurse -ForceUnsigned:$ForceUnsigned -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
+            Add-WindowsDriver -Path $MountPath -Driver $driverPath -Recurse -ForceUnsigned:$ForceUnsigned @common -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
         } | Out-Null
     }
 }

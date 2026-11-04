@@ -44,8 +44,9 @@ function Remove-WinMediaAppx {
         'Microsoft.AV1VideoExtension', 'Microsoft.RawImageExtension', 'Microsoft.WebpImageExtension', 'Microsoft.AVCEncoderVideoExtension',
         'Microsoft.MPEG2VideoExtension'
     )
+    $common = Get-WinMediaDismCommonParameter -Config $Config
     $all = @(Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-        Get-AppxProvisionedPackage -Path $MountPath -LogLevel $Config.DismLogLevel
+        Get-AppxProvisionedPackage -Path $MountPath @common -LogLevel $Config.DismLogLevel
     })
     foreach ($pkg in $all) {
         # PackageName 為 PackageFullName（Name_Version_Arch_ResourceId_PublisherId），取最後一段組成 PFN，與清單精確比對
@@ -56,7 +57,7 @@ function Remove-WinMediaAppx {
         if (-not $remove) { continue }
         $name = $pkg.PackageName
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Remove-AppxProvisionedPackage -Path $MountPath -PackageName $name -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
+            Remove-AppxProvisionedPackage -Path $MountPath -PackageName $name @common -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
         } | Out-Null
         Write-WinMediaLog -Config $Config -Level Info -Message "已移除 provisioned app：$pfn"
     }

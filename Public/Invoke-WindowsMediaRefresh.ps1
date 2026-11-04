@@ -33,7 +33,9 @@
         [string]$MountDir,
         [string]$OutputDir,
         # 參數端先擋掉非法值（給出 PowerShell 的參數錯誤）；合法名單與預設值的權威定義在 Resolve-WinMediaDismLogLevel
-        [ValidateSet('Errors', 'Warnings', 'WarningsInfo', 'Debug')][string]$DismLogLevel
+        [ValidateSet('Errors', 'Warnings', 'WarningsInfo', 'Debug')][string]$DismLogLevel,
+        # 輸出形式覆寫 Config.OutputForm；未指定時沿用設定檔（空白 = 自動）
+        [ValidateSet('Iso', 'Folder', 'Image')][string]$OutputForm
     )
 
     $steps = @(
@@ -72,6 +74,12 @@
     if ([string]::IsNullOrWhiteSpace($Config.WorkDir) -or -not [System.IO.Path]::IsPathRooted($Config.WorkDir)) {
         throw "WorkDir 必須為絕對路徑，目前為：'$($Config.WorkDir)'。"
     }
+    # 根目錄相對路徑（如 \WinMediaWork）會通過 IsPathRooted，須補成完整路徑（與提權參數相同的解析）
+    $Config.WorkDir = Get-WinMediaFullPath -Path $Config.WorkDir
+    if ($WorkDir) {
+        $Config.LogDir = Join-Path -Path $Config.WorkDir -ChildPath 'logs'
+        $Config.OperationLog = Join-Path -Path $Config.LogDir -ChildPath 'OperationLog.txt'
+    }
     # 設定檔可能沒有 LogDir／OperationLog；Invoke-WinMediaOperation 直接讀取 OperationLog，須在第一次呼叫前補齊
     $location = Resolve-WinMediaLogLocation -Config $Config
     $Config.LogDir = $location.LogDir
@@ -82,9 +90,16 @@
     if ($PSBoundParameters.ContainsKey('DismLogLevel')) { $Config.DismLogLevel = $DismLogLevel }
     # 舊設定檔缺 DismLogLevel 時補預設並驗證（規則集中在 Keel 的 Resolve-WinMediaDismLogLevel）
     $Config.DismLogLevel = Resolve-WinMediaDismLogLevel -Config $Config
+    if ($PSBoundParameters.ContainsKey('OutputForm')) { $Config.OutputForm = $OutputForm }
+    # 新鍵補預設值並驗證（舊設定檔可能沒有）；OutputForm 由 Step 10 的輸出流程使用
+    $Config = Resolve-WinMediaMountOption -Config $Config
     # pwsh 7 下的 DISM 主機檢查（DismUseWindowsPowerShell 為關閉時中止）；開啟時於第一次 DISM 呼叫前先檢查、沒有才匯入
     Test-WinMediaDismHost -Provider $Config.DismProvider -Config $Config
     $Config.MountDir = Resolve-WinMediaMountDir -WorkDir $Config.WorkDir -MountDir $Config.MountDir
+    # .esd 來源沒有開機檔與媒體樹：輸出形式在此一次決定（明確指定 Iso／Folder 直接拒絕，早於任何檔案動作）
+    $isEsdSource = [System.IO.Path]::GetExtension($SourceIso) -ieq '.esd'
+    $plan = Resolve-WinMediaOutputPlan -OutputFormat $Config.OutputFormat -OutputForm $Config.OutputForm -SourceKind $(if ($isEsdSource) { 'Esd' } else { 'Iso' })
+    if ($plan.AutoImage) { Write-Warning '來源為 .esd 且未指定 OutputForm，改輸出 Image（install.wim 或 install.esd 放在 OutputDir）；.esd 來源沒有開機檔，無法打包 ISO。' }
     # 空白 = 工具所在磁碟根目錄\WinMediaOut（與 WorkDir 並列，不在 OneDrive 內，不受第 12 步清理影響）
     if ([string]::IsNullOrWhiteSpace($Config.OutputDir)) {
         $Config.OutputDir = Join-Path -Path ([System.IO.Path]::GetPathRoot($PSScriptRoot)) -ChildPath 'WinMediaOut'
@@ -108,22 +123,36 @@
     $resetBaseOS = Resolve-WinMediaResetBaseOS -Config $Config
 
     # 步驟 1：前置檢查
-    $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    # 網路路徑於管理員檢查之前拒絕（需求第 6、10 項）；入口腳本已先做過一次，函式直接呼叫時仍需檢查
+    Assert-WinMediaLocalPath -Path $SourceIso -Name 'SourceIso'
+    Assert-WinMediaLocalPath -Path $Config.WorkDir -Name 'WorkDir'
+    Assert-WinMediaLocalPath -Path $Config.MountDir -Name 'MountDir'
+    Assert-WinMediaLocalPath -Path $Config.OutputDir -Name 'OutputDir'
+    if (-not [string]::IsNullOrWhiteSpace($Config.ScratchDirectory)) {
+        Assert-WinMediaScratchPath -ScratchDirectory $Config.ScratchDirectory -MountDir $Config.MountDir -WorkDir $Config.WorkDir
+    }
+    # 不在此提示提權：提權由入口腳本 Update-WindowsMedia.ps1 負責；函式只警告並丟出原訊息
+    if (-not (Test-WinMediaAdministrator)) {
+        if ([Environment]::UserInteractive) { Write-Warning '請以系統管理員身分重新執行，或改用 Update-WindowsMedia.ps1（會提示提權）。' }
         throw '需要系統管理員權限。'
     }
     # Defender 排除（選項 DefenderExclusions）：WorkDir 建立並套用 ACL 後才加入（狀態檔放 WorkDir 根目錄），finally 只還原本次新增的項目
     $defenderAdded = @()
     $defenderState = $null
     try {
-    $oneDrive = [string]$env:OneDrive
-    if ($oneDrive) {
-        if (Test-PathWithin -Child $Config.WorkDir -Parent $oneDrive) {
-            throw 'WorkDir 位於 OneDrive 內，請改用其他路徑（見 Config/Default.psd1）。'
-        }
-        if (Test-PathWithin -Child $Config.MountDir -Parent $oneDrive) {
-            throw 'MountDir 位於 OneDrive 內，掛載點不可由同步服務鎖定，請改用其他路徑。'
-        }
+    # 雲端同步資料夾只警告不中止：使用者可能已確認同步設定；掛載點位於同步資料夾時風險較高，文字不同
+    $cloud = Get-WinMediaCloudProvider -Path $Config.WorkDir
+    if ($cloud) { Write-Warning "WorkDir 位於 $cloud 同步資料夾內，同步服務可能鎖定或搬移工作檔，建議改用其他路徑（見 Config/Default.psd1）。" }
+    $cloud = Get-WinMediaCloudProvider -Path $Config.MountDir
+    if ($cloud) { Write-Warning "MountDir 位於 $cloud 同步資料夾內，掛載點可能被同步服務鎖定，建議改用其他路徑。" }
+    if (-not [string]::IsNullOrWhiteSpace($Config.ScratchDirectory)) {
+        $cloud = Get-WinMediaCloudProvider -Path $Config.ScratchDirectory
+        if ($cloud) { Write-Warning "ScratchDirectory 位於 $cloud 同步資料夾內，同步服務可能鎖定暫存檔，建議改用其他路徑。" }
+    }
+    # 掛載需要 NTFS；無法判斷檔案系統（UNC 等，已於前面拒絕）時不擋
+    $mountFileSystem = Get-WinMediaVolumeFileSystem -Path $Config.MountDir
+    if ($mountFileSystem -and $mountFileSystem -ne 'NTFS') {
+        throw "MountDir 必須位於 NTFS 磁碟區，目前為 $mountFileSystem：$($Config.MountDir)"
     }
     if (-not (Test-Path -LiteralPath $SourceIso -PathType Leaf)) {
         throw "找不到母檔：$SourceIso"
@@ -142,12 +171,15 @@
         throw "找不到 LXP 資料夾：$($Config.Lxp.Path)"
     }
     if ($Config.WinPEUpdate -notin 'SafeOS', 'Lcu') { throw "不支援的 WinPEUpdate：$($Config.WinPEUpdate)" }
+    # $plan 已於 Resolve-WinMediaMountDir 之後算好（含 .esd 來源規則），此處沿用
+    # 可寫掛載才帶 -Optimize／-CheckIntegrity（Keel 的 Remount 參數集不接受；唯讀掛載不需要）
+    $mountSwitches = Get-WinMediaMountSwitch -Config $Config
+    # DISM 共用參數（只在設定 ScratchDirectory 時含鍵）；每個 DISM 呼叫都要 splat，由 AST 測試確認
+    $common = Get-WinMediaDismCommonParameter -Config $Config
+    # 工具需求依 $plan：oscdimg 只在 Iso 時需要；wimlib 已由上方為 boot.wim 解析，此處只在 ESD 時補上
     $oscdimg = $null
-    switch ($Config.OutputFormat) {
-        'WIM' { $oscdimg = Resolve-WinMediaOscdimg -Config $Config }
-        'ESD' { $null = Resolve-WinMediaWimlib -Config $Config }
-        default { throw "不支援的 OutputFormat：$($Config.OutputFormat)" }
-    }
+    if ($plan.NeedsOscdimg) { $oscdimg = Resolve-WinMediaOscdimg -Config $Config }
+    if ($plan.NeedsWimlib) { $null = Resolve-WinMediaWimlib -Config $Config }
     if ($Config.DismProvider -eq 'ADK') { $null = Resolve-WinMediaAdk -Config $Config }
 
     $workDir = $Config.WorkDir
@@ -165,9 +197,33 @@
     $winreWim = Join-Path -Path $winreDir -ChildPath 'winre.wim'
 
     # 輸出目錄不得位於會被清理或掛載的目錄之下（Must 2）；須在 Use 迴圈之前檢查，否則已登記目錄會先被清空
+    # 來源不得位於會被 Use-WinMediaWorkDir 清空的目錄之內，否則使用者的原始檔會先被清掉（ISO 與 .esd 來源都適用）
+    foreach ($dir in @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir)) {
+        if (Test-PathWithin -Child $SourceIso -Parent $dir) { throw "來源映像位於工作子目錄之內，會被清空：$SourceIso" }
+    }
+    # 來源即上一次的 Image 輸出時，匯出會先刪除目的檔（即使用者的來源），因此直接拒絕
+    foreach ($outName in 'install.esd', 'install.wim') {
+        if ((Get-WinMediaFullPath -Path $SourceIso) -ieq (Get-WinMediaFullPath -Path (Join-Path -Path $Config.OutputDir -ChildPath $outName))) { throw "來源與輸出相同，會被覆寫：$SourceIso" }
+    }
+    # 平行路徑的守衛提前到任何登記之前（與後段平行分支內的守衛相同；序列路徑不受影響）
+    if ([int]$Config.MountParallelCount -gt 1) {
+        $earlyParallelDir = Join-Path -Path $workDir -ChildPath 'parallel'
+        if (Test-PathWithin -Child $SourceIso -Parent $earlyParallelDir) { throw "來源映像位於平行工作目錄之內，會被清空：$SourceIso" }
+        if (Test-PathWithin -Child $Config.OutputDir -Parent $earlyParallelDir) { throw "OutputDir 位於平行工作目錄之內，會被清空：$($Config.OutputDir)" }
+        if (Test-PathWithin -Child $mountDir -Parent $earlyParallelDir) { throw "MountDir 位於平行工作目錄之內，會被清空：$mountDir" }
+        if (Test-PathWithin -Child $Config.LogDir -Parent $earlyParallelDir) { throw "LogDir 位於平行工作目錄之內，會被清空：$($Config.LogDir)" }
+        if (Test-PathWithin -Child $Config.LogFile -Parent $earlyParallelDir) { throw "LogFile 位於平行工作目錄之內，會被清空：$($Config.LogFile)" }
+        if (Test-PathWithin -Child $Config.OperationLog -Parent $earlyParallelDir) { throw "OperationLog 位於平行工作目錄之內，會被清空：$($Config.OperationLog)" }
+        if ($Config.ContainsKey('ScratchDirectory') -and -not [string]::IsNullOrWhiteSpace($Config.ScratchDirectory) -and (Test-PathWithin -Child $Config.ScratchDirectory -Parent $earlyParallelDir)) { throw "ScratchDirectory 位於平行工作目錄之內，會被清空：$($Config.ScratchDirectory)" }
+    }
     Assert-WinMediaOutputDir -OutputDir $Config.OutputDir -ProtectedDir @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir, $mountDir)
     # 掛載目錄若已存在且非空，直接中止，不像 Convert-UUP.cmd:1060 那樣 rmdir 既有目錄
     if ((Test-Path -LiteralPath $mountDir) -and @(Get-ChildItem -LiteralPath $mountDir -Force).Count -gt 0) {
+        # 映像掛載在子資料夾（install-N、boot-N、winre…）而非 $mountDir 本身；需要重新掛載的只拒絕並指向清理步驟，不在此自動處理
+        $stale = @(Get-ChildItem -LiteralPath $mountDir -Directory -Force | Where-Object { (Get-WinMediaMountState -Path $_.FullName -Config $Config) -eq 'NeedsRemount' })
+        if ($stale.Count -gt 0) {
+            throw "掛載目錄內有需要重新掛載（NeedsRemount）的映像：$($stale[0].FullName)。請先執行 Clear-WindowsMediaWorkspace.ps1（步驟 11）清理，再重試。"
+        }
         throw "掛載目錄已存在且非空：$mountDir（請指定空目錄或刪除後重試）。"
     }
     $mountDirCreated = -not (Test-Path -LiteralPath $mountDir)
@@ -182,7 +238,8 @@
     if ($Config.ContainsKey('DefenderExclusions') -and $Config.DefenderExclusions) {
         $defenderAdded = Add-WinMediaDefenderExclusion -Path @($workDir, $mountDir, $Config.OutputDir) -StatePath $defenderState
     }
-    foreach ($dir in @($mountDir, $Config.LogDir, $Config.OutputDir)) {
+    # ScratchDirectory 由本工具建立（Keel 的 DISM 包裝不建立）；空白時略過
+    foreach ($dir in @($mountDir, $Config.LogDir, $Config.OutputDir, $Config.ScratchDirectory) | Where-Object { $_ }) {
         if (-not (Test-Path -LiteralPath $dir)) {
             Invoke-WinMediaOperation -Category File -Operation 'CreateDirectory' -Target $dir -Config $Config -ScriptBlock {
                 New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -202,6 +259,11 @@
         Write-WinMediaLog -Config $Config -Level Info -Message "語言包 $(@($langFod.LangPacks).Count) 個、FoD $(@($langFod.Fod).Count) 個（依 Languages 篩選，於 LCU 之後注入）。"
     }
 
+    if ($isEsdSource) {
+        # .esd 來源沒有媒體樹：副本放在 media\sources\install.esd，下方步驟 2a 轉換後移除副本，原始檔不動
+        Copy-WinMediaEsdSource -SourcePath $SourceIso -DestinationPath $installEsd -WimPath $installWim -WorkDir $workDir -Config $Config
+    }
+    else {
     # 步驟 2：掛載母檔（唯讀）並複製；母檔不修改（§3.3）
     $isoMount = Mount-WinMediaSourceIso -ImagePath $SourceIso -Confirm:$false
     try {
@@ -219,6 +281,7 @@
     Get-ChildItem -LiteralPath $mediaDir -Recurse -Force -File | ForEach-Object { $_.IsReadOnly = $false }
     # 步驟 2 之後、2a 之前：移除未選取的額外語言（先於步驟 8 的 Setup DU，使 /U 規則不會把它們建回來）
     Remove-WinMediaExtraLanguage -MediaDir $mediaDir -Languages @($Config.Languages) -Config $Config
+    }  # 結束：非 .esd 來源
 
     # 步驟 2a：install.esd → install.wim（§2.7.3）
     if (Test-Path -LiteralPath $installEsd) {
@@ -317,20 +380,20 @@
 
     # WinRE 套用 SafeOS DU 後的 ntoskrnl 版本，供步驟 9 守衛判斷開機索引是否取自已更新的 WinRE
     $winreKernel = @{ Base = $null; Version = $null }
-    Mount-WinMediaImage -ImagePath $winreWim -Index 1 -MountPath (Join-Path -Path $mountDir -ChildPath 'winre') -Config $Config -Action {
+    Mount-WinMediaImage -ImagePath $winreWim -Index 1 -MountPath (Join-Path -Path $mountDir -ChildPath 'winre') @mountSwitches -Config $Config -Action {
         param($mounted)
         Write-WinMediaLog -Config $Config -Level Verbose -Message "WinRE 掛載點：$mounted"
         $winreKernel.Base = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsPackage -Path $mounted -PackagePath $ssu -LogLevel $Config.DismLogLevel | Out-Null
+            Add-WindowsPackage -Path $mounted -PackagePath $ssu @common -LogLevel $Config.DismLogLevel | Out-Null
         }
         if ($safeOs) {
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $safeOs -LogLevel $Config.DismLogLevel | Out-Null
+                Add-WindowsPackage -Path $mounted -PackagePath $safeOs @common -LogLevel $Config.DismLogLevel | Out-Null
             }
         }
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:([bool]$Config.ResetBase) -LogLevel $Config.DismLogLevel | Out-Null
+            Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:([bool]$Config.ResetBase) @common -LogLevel $Config.DismLogLevel | Out-Null
         }
         $winreKernel.Version = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
         if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'WinRE' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
@@ -343,54 +406,34 @@
     $installKernel = @{ Version = $null }
     # 第一個目標索引的建置資訊（SOFTWARE hive：CurrentBuild、UBR、DisplayVersion、BuildBranch），供步驟 11 組 ISO 檔名；讀取失敗時保持 $null
     $buildInfo = @{ Info = $null }
-    foreach ($index in $targets) {
-        Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) -Config $Config -Action {
-            param($mounted)
-            Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $ssu -LogLevel $Config.DismLogLevel | Out-Null
-            }
-            # 文件步驟 10–11：語言包與 FoD 必須在最新 LCU 之前注入
-            Install-WinMediaLangFod -MountPath $mounted -Set $langFod -Config $Config
-            # 文件步驟 13：最新 LCU（連同前置 checkpoint，經暫存資料夾）
-            Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $lcuStage -LogLevel $Config.DismLogLevel | Out-Null
-            }
-            # 文件步驟 14：cleanup；CBS_E_PENDING（0x800F0806）只警告，其他錯誤照常中止（Mount-WinMediaImage 失敗時會 Discard）
-            try {
-                Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Repair-WindowsImage -Path $mounted -StartComponentCleanup -ResetBase:$resetBaseOS -LogLevel $Config.DismLogLevel | Out-Null
-                } | Out-Null
-            }
-            catch {
-                if ($_.Exception.HResult -ne -2146498554 -and $_.Exception.Message -notmatch '0x800f0806') { throw }
-                Write-WinMediaLog -Config $Config -Level Warning -Message 'install.wim cleanup 有待處理作業（0x800F0806），略過本次 cleanup；需開機完成後再處理。'
-            }
-            # 文件步驟 15：NetFx3 必須在 cleanup 之後、.NET CU 之前
-            Install-WinMediaDeferredFod -MountPath $mounted -Set $langFod -Config $Config
-            if ($dotNet) {
-                Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Add-WindowsPackage -Path $mounted -PackagePath $dotNet -LogLevel $Config.DismLogLevel | Out-Null
-                }
-            }
-            if ($appxList) { Remove-WinMediaAppx -MountPath $mounted -AppxList $appxList -Config $Config }
-            Install-WinMediaStoreApp -MountPath $mounted -Set $storeSet -Config $Config
-            if ($lxpItems.Count -gt 0) { Install-WinMediaLxp -MountPath $mounted -Lxp $lxpItems -Config $Config }
-            if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Install' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
-            if ($index -eq $targets[0]) { $installKernel.Version = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion }
-            # 媒體 sources\xmllite.dll 取自第一個目標索引、已套用 LCU 的版本（convert-UUP 取自 metadata ESD 索引 3，此處沒有該來源）
-            if ($index -eq $targets[0]) {
-                $buildInfo.Info = Get-WinMediaBuildInfo -MountPath $mounted -WorkDir $Config.WorkDir -Config $Config
-                Invoke-WinMediaOperation -Category File -Operation 'CopyXmlLite' -Target $sourcesDir -Config $Config -ScriptBlock {
-                    Copy-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\xmllite.dll') -Destination (Join-Path -Path $sourcesDir -ChildPath 'xmllite.dll') -Force
-                } | Out-Null
-            }
-            Invoke-WinMediaOperation -Category File -Operation 'ReplaceWinRE' -Target $mounted -Config $Config -ScriptBlock {
-                Copy-Item -LiteralPath $winreWim -Destination (Join-Path -Path $mounted -ChildPath 'Windows\System32\Recovery\winre.wim') -Force
-            } | Out-Null
-            # 文件步驟之後（convert-UUP 3895–3930 行）：最後執行，使開機檔取自已套用 LCU 的映像
-            # 缺鍵時視為開啟（預設開）；StrictMode 下直接讀取缺少的鍵會拋錯，因此先用 ContainsKey
-            if (-not $Config.ContainsKey('UpdateBootFiles') -or $Config.UpdateBootFiles) { $bootEx.Applied = Copy-WinMediaUpdatedBootFiles -MountPath $mounted -MediaDir $mediaDir -Config $Config }
+    # Step 12c-3b：MountParallelCount 大於 1 時改走平行路徑；1 維持下方的序列迴圈
+    $parallelCount = Get-WinMediaParallelCount -Requested ([int]$Config.MountParallelCount) -TargetCount $targets.Count
+    if ($parallelCount -gt 1) {
+        $parallelConfig = @{}
+        foreach ($k in $Config.Keys) { $parallelConfig[$k] = $Config[$k] }
+        $parallelConfig['MountDir'] = $mountDir
+        $baseJob = @{ mountSwitches = $mountSwitches; Config = $parallelConfig; ssu = $ssu; lcuStage = $lcuStage; langFod = $langFod; dotNet = $dotNet; appxList = $appxList; storeSet = $storeSet; lxpItems = $lxpItems; driverSet = $driverSet; forceUnsigned = $forceUnsigned; resetBaseOS = $resetBaseOS; common = $common; winreWim = $winreWim }
+        $parallelDir = Join-Path -Path $workDir -ChildPath 'parallel'
+        # 登記前先守衛：來源或成品位於平行目錄之內時，登記的清空會刪除它們（與 L196、L202 同理）
+        if (Test-PathWithin -Child $SourceIso -Parent $parallelDir) { throw "來源映像位於平行工作目錄之內，會被清空：$SourceIso" }
+        if (Test-PathWithin -Child $Config.OutputDir -Parent $parallelDir) { throw "OutputDir 位於平行工作目錄之內，會被清空：$($Config.OutputDir)" }
+        if (Test-PathWithin -Child $mountDir -Parent $parallelDir) { throw "MountDir 位於平行工作目錄之內，會被清空：$mountDir" }
+        if (Test-PathWithin -Child $Config.LogDir -Parent $parallelDir) { throw "LogDir 位於平行工作目錄之內，會被清空：$($Config.LogDir)" }
+        if (Test-PathWithin -Child $Config.LogFile -Parent $parallelDir) { throw "LogFile 位於平行工作目錄之內，會被清空：$($Config.LogFile)" }
+        if (Test-PathWithin -Child $Config.OperationLog -Parent $parallelDir) { throw "OperationLog 位於平行工作目錄之內，會被清空：$($Config.OperationLog)" }
+        if ($Config.ContainsKey('ScratchDirectory') -and -not [string]::IsNullOrWhiteSpace($Config.ScratchDirectory) -and (Test-PathWithin -Child $Config.ScratchDirectory -Parent $parallelDir)) { throw "ScratchDirectory 位於平行工作目錄之內，會被清空：$($Config.ScratchDirectory)" }
+        Invoke-WinMediaOperation -Category File -Operation 'UseWorkDir' -Target $parallelDir -Config $Config -ScriptBlock {
+            Use-WinMediaWorkDir -Path $parallelDir
         } | Out-Null
+        Invoke-WinMediaParallelInstall -InstallWim $installWim -AllIndexes $indexes -Targets $targets -ParallelRoot $parallelDir -MountDir $mountDir -BaseJob $baseJob -Config $parallelConfig -SourcesDir $sourcesDir -MediaDir $mediaDir -MaxConcurrent $parallelCount -InstallKernel $installKernel -BuildInfo $buildInfo -BootEx $bootEx -IsEsdSource:([bool]$isEsdSource)
+    }
+    else {
+    foreach ($index in $targets) {
+        Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) @mountSwitches -Config $Config -Action {
+            param($mounted)
+        Invoke-WinMediaInstallIndexUpdate -mounted $mounted -ssu $ssu -lcuStage $lcuStage -langFod $langFod -dotNet $dotNet -appxList $appxList -storeSet $storeSet -lxpItems $lxpItems -driverSet $driverSet -forceUnsigned $forceUnsigned -resetBaseOS $resetBaseOS -common $common -IsFirstTarget:($index -eq $targets[0]) -sourcesDir $sourcesDir -winreWim $winreWim -isEsdSource:$isEsdSource -mediaDir $mediaDir -Config $Config -installKernel $installKernel -buildInfo $buildInfo -bootEx $bootEx
+        } | Out-Null
+    }
     }
 
     # 步驟 7：虛擬版本（§2.7.4）；從已更新的 EnterpriseS 索引建立
@@ -400,6 +443,8 @@
         }
     }
 
+    # 步驟 8–9 需要媒體樹（Setup DU、boot.wim），.esd 來源略過
+    if (-not $isEsdSource) {
     # 步驟 8（文件第 26 列）：Setup DU 先展開到暫存目錄，再依 convert-UUP 2349–2358 行的規則複製進 sources（只更新既有檔與既有語言）；其後的 setup.exe／setuphost.exe 由步驟 9 的 boot.wim 索引 2 同步覆蓋（第 27 列）；兩者的先後順序不可對調
     if ($setupDu) {
         $duDir = Join-Path -Path $workDir -ChildPath 'setupdu'
@@ -420,18 +465,18 @@
 
     # 步驟 9：boot.wim 索引 1 與 2（§3.2 step 7、8）
     foreach ($bootIndex in 1, 2) {
-        Mount-WinMediaImage -ImagePath $bootWim -Index $bootIndex -MountPath (Join-Path -Path $mountDir -ChildPath ('boot-{0}' -f $bootIndex)) -Config $Config -Action {
+        Mount-WinMediaImage -ImagePath $bootWim -Index $bootIndex -MountPath (Join-Path -Path $mountDir -ChildPath ('boot-{0}' -f $bootIndex)) @mountSwitches -Config $Config -Action {
             param($mounted)
             # 不單獨加入 SSU：獨立加入的 SSU 會被暫停（pended），其後的 LCU 會被略過、CBS 停留在 9441；LCU 套件本身已含 SSU（實測單獨加入即升至 9711）
             # 直接套用目標 LCU msu（資料夾模式會先處理較舊的 checkpoint msu，實測 KB5043080 回 0x80070228）
             # 只有 Lcu 路線在此以原始 MSU 直接加入 LCU；實測 DISM 判定 Not applicable（無效果），SafeOS 路線的核心版本由步驟 5 的 SafeOS DU 提供
             if ($Config.WinPEUpdate -eq 'Lcu') {
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                    Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target -LogLevel $Config.DismLogLevel | Out-Null
+                    Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target @common -LogLevel $Config.DismLogLevel | Out-Null
                 }
             }
             Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Repair-WindowsImage -Path $mounted -StartComponentCleanup -LogLevel $Config.DismLogLevel | Out-Null
+                Repair-WindowsImage -Path $mounted -StartComponentCleanup @common -LogLevel $Config.DismLogLevel | Out-Null
             }
             $bootKernel = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
             Test-WinMediaKernelConsistency -BootKernel $bootKernel -WinreKernel $winreKernel.Version -InstallKernel $installKernel.Version -WinreBaseKernel $winreKernel.Base -BootIndex $bootIndex
@@ -476,18 +521,20 @@
     # 步驟 9 之後：boot.wim export（--boot）與 optimize，對應 convert-UUP 的 wimlib export／optimize
     Compress-WinMediaBootWim -BootWim $bootWim -Config $Config
 
+    }  # 結束：非 .esd 來源（步驟 8–9）
     # 步驟 10：移除來源 EnterpriseS（僅在設定開啟且已建立虛擬版本時，§2.7.6）
     if ($Config.DeleteSourceEdition -and $virtualEditions.Count -gt 0 -and $ltscIndex) {
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Remove-WindowsImage -ImagePath $installWim -Index $ltscIndex.ImageIndex -LogLevel $Config.DismLogLevel | Out-Null
+            Remove-WindowsImage -ImagePath $installWim -Index $ltscIndex.ImageIndex @common -LogLevel $Config.DismLogLevel | Out-Null
         } | Out-Null
     }
 
+    if (-not $isEsdSource) {
     # 步驟 10（續）：ei.cfg 必須在索引移除之後判斷（§2.7.5）
     $eiCfg = Join-Path -Path $sourcesDir -ChildPath 'ei.cfg'
     $userEiCfg = Join-Path -Path $Config.PackageDir -ChildPath 'ei.cfg'
     $finalCount = @(Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-        Get-WindowsImage -ImagePath $installWim -LogLevel $Config.DismLogLevel
+        Get-WindowsImage -ImagePath $installWim @common -LogLevel $Config.DismLogLevel
     }).Count
     if ($finalCount -gt 1) {
         if (Test-Path -LiteralPath $userEiCfg) {
@@ -502,59 +549,92 @@
         }
     }
 
-    # 步驟 11：輸出；ESD 寫入 OutputDir（不留在 WorkDir），ISO 以 oscdimg 產生
-    if ($Config.OutputFormat -eq 'ESD') {
-        $output = Join-Path -Path $Config.OutputDir -ChildPath 'install.esd'
-        if ((Test-Path -LiteralPath $output) -and -not $Force) {
-            throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
+    }  # 結束：非 .esd 來源（ei.cfg）
+    # 檔名只在 Iso 與 Folder 需要，Image 不組名（避免 Image 執行時出現無關的「組 ISO 檔名失敗」警告）
+    if ($plan.OutputForm -ne 'Image') {
+    # 步驟 11：輸出形式（藍圖 F7）；檔名在任何 ESD 匯出移除 install.wim 之前組好，供 Iso 與 Folder 共用
+    # 組檔名所需的建置資訊已在步驟 6 讀出；任何失敗只記警告並退回預設名稱，不中止整次執行
+    $nameArgs = @{ Timestamp = (Get-Date -Format 'yyyyMMdd-HHmmss'); Arch = $architecture; Languages = @($syncLanguages) }
+    try {
+        $info = $buildInfo.Info
+        if ($info) {
+            $nameArgs.DisplayVersion = $info.DisplayVersion
+            $nameArgs.Build = $info.CurrentBuild
+            if ($null -ne $info.UBR) { $nameArgs.Revision = [string]$info.UBR }
+            if ($info.BuildBranch) { $nameArgs.BranchUpper = ([string]$info.BuildBranch).ToUpperInvariant() }
         }
-        Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $output -Config $Config
-    }
-    else {
-        # 組 ISO 檔名所需的建置資訊已在步驟 6 讀出；任何失敗只記警告並退回舊格式，不中止整次執行
-        $nameArgs = @{ Timestamp = (Get-Date -Format 'yyyyMMdd-HHmmss'); Arch = $architecture; Languages = @($syncLanguages) }
-        try {
-            $info = $buildInfo.Info
-            if ($info) {
-                $nameArgs.DisplayVersion = $info.DisplayVersion
-                $nameArgs.Build = $info.CurrentBuild
-                if ($null -ne $info.UBR) { $nameArgs.Revision = [string]$info.UBR }
-                if ($info.BuildBranch) { $nameArgs.BranchUpper = ([string]$info.BuildBranch).ToUpperInvariant() }
-            }
-            if ($targets.Count -lt @($images).Count) { Write-WinMediaLog -Config $Config -Level Warning -Message ('只更新 {0}/{1} 個索引，檔名的建置號與 UBR 取自第一個目標索引，未更新的索引不含這些更新' -f $targets.Count, @($images).Count) }
-            if ($finalCount -gt 1) { $nameArgs.Edition = 'CLIENTMULTI' }
-            else {
-                $edition = @(Get-WinMediaIndexInfo -ImagePath $installWim -Config $Config)[0].EditionId
-                if ($edition) { $nameArgs.Edition = 'CLIENT' + ([string]$edition).ToUpperInvariant() }
-            }
-            $idwb = Join-Path -Path $sourcesDir -ChildPath 'idwbinfo.txt'
-            if ((Test-Path -LiteralPath $idwb) -and ((Get-Content -LiteralPath $idwb -Raw) -match '(?m)^\s*BuildType\s*=\s*(\w+)')) { $nameArgs.BuildType = $Matches[1] }
-            $isoName = New-WinMediaOutputName @nameArgs
-        }
-        catch {
-            Write-WinMediaLog -Config $Config -Level Warning -Message ('組 ISO 檔名失敗，改用預設名稱：{0}' -f $_.Exception.Message)
-            $isoName = 'WinMedia_{0}.iso' -f $nameArgs.Timestamp
-        }
-        $output = Join-Path -Path $Config.OutputDir -ChildPath $isoName
-        if ((Test-Path -LiteralPath $output) -and -not $Force) {
-            throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
-        }
-        # 開機檔依架構不同：x64 有 BIOS（etfsboot.com）與 UEFI（efisys.bin）；ARM64 媒體只有 UEFI，沒有 etfsboot.com
-        $efiBoot = Join-Path -Path $mediaDir -ChildPath 'efi\microsoft\boot\efisys.bin'
-        if (-not (Test-Path -LiteralPath $efiBoot)) { throw "找不到 UEFI 開機檔：$efiBoot（媒體目錄可能不完整）" }
-        if ($architecture -eq 'arm64') {
-            $bootData = '-bootdata:1#pEF,e,b"{0}"' -f $efiBoot
-        }
+        if ($targets.Count -lt @($images).Count) { Write-WinMediaLog -Config $Config -Level Warning -Message ('只更新 {0}/{1} 個索引，檔名的建置號與 UBR 取自第一個目標索引，未更新的索引不含這些更新' -f $targets.Count, @($images).Count) }
+        if ($finalCount -gt 1) { $nameArgs.Edition = 'CLIENTMULTI' }
         else {
-            $biosBoot = Join-Path -Path $mediaDir -ChildPath 'boot\etfsboot.com'
-            if (-not (Test-Path -LiteralPath $biosBoot)) { throw "找不到 BIOS 開機檔：$biosBoot（媒體目錄可能不完整）" }
-            $bootData = '-bootdata:2#p0,e,b"{0}"#pEF,e,b"{1}"' -f $biosBoot, $efiBoot
+            $edition = @(Get-WinMediaIndexInfo -ImagePath $installWim -Config $Config)[0].EditionId
+            if ($edition) { $nameArgs.Edition = 'CLIENT' + ([string]$edition).ToUpperInvariant() }
         }
-        # -o：去除重複檔案，與 convert-UUP 的 oscdimg 參數一致（對應參考腳本 convert-UUP.cmd 的 oscdimg 參數）
-        $burn = Invoke-WinMediaExternal -FilePath $oscdimg -ArgumentList @($bootData, '-o', '-u2', '-udfver102', '-m', $mediaDir, $output) -Config $Config
-        if ($burn.ExitCode -ne 0) {
-            throw "oscdimg 失敗，結束碼 $($burn.ExitCode)：$($burn.StdErr)"
+        $idwb = Join-Path -Path $sourcesDir -ChildPath 'idwbinfo.txt'
+        if ((Test-Path -LiteralPath $idwb) -and ((Get-Content -LiteralPath $idwb -Raw) -match '(?m)^\s*BuildType\s*=\s*(\w+)')) { $nameArgs.BuildType = $Matches[1] }
+        $isoName = New-WinMediaOutputName @nameArgs
+    }
+    catch {
+        Write-WinMediaLog -Config $Config -Level Warning -Message ('組 ISO 檔名失敗，改用預設名稱：{0}' -f $_.Exception.Message)
+        $isoName = 'WinMedia_{0}.iso' -f $nameArgs.Timestamp
+    }
+    }  # 結束：檔名（Iso／Folder）
+    $isEsd = $Config.OutputFormat -eq 'ESD'
+    switch ($plan.OutputForm) {
+        'Iso' {
+            $output = Join-Path -Path $Config.OutputDir -ChildPath $isoName
+            if ((Test-Path -LiteralPath $output) -and -not $Force) {
+                throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
+            }
+            # 開機檔依架構不同：x64 有 BIOS（etfsboot.com）與 UEFI（efisys.bin）；ARM64 媒體只有 UEFI，沒有 etfsboot.com
+            # 所有失敗檢查都在 ESD 匯出（會移除 install.wim）與 oscdimg 之前完成
+            $efiBoot = Join-Path -Path $mediaDir -ChildPath 'efi\microsoft\boot\efisys.bin'
+            if (-not (Test-Path -LiteralPath $efiBoot)) { throw "找不到 UEFI 開機檔：$efiBoot（媒體目錄可能不完整）" }
+            if ($architecture -eq 'arm64') {
+                $bootData = '-bootdata:1#pEF,e,b"{0}"' -f $efiBoot
+            }
+            else {
+                $biosBoot = Join-Path -Path $mediaDir -ChildPath 'boot\etfsboot.com'
+                if (-not (Test-Path -LiteralPath $biosBoot)) { throw "找不到 BIOS 開機檔：$biosBoot（媒體目錄可能不完整）" }
+                $bootData = '-bootdata:2#p0,e,b"{0}"#pEF,e,b"{1}"' -f $biosBoot, $efiBoot
+            }
+            # ESD 來源 WIM 只在 WorkDir 內轉成 install.esd；Keel 驗證映像數後才移除 install.wim，不寫到 OutputDir
+            if ($isEsd) { Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $installEsd -Config $Config }
+            # -o：去除重複檔案，與 convert-UUP 的 oscdimg 參數一致（對應參考腳本 convert-UUP.cmd 的 oscdimg 參數）
+            $burn = Invoke-WinMediaExternal -FilePath $oscdimg -ArgumentList @($bootData, '-o', '-u2', '-udfver102', '-m', $mediaDir, $output) -Config $Config
+            if ($burn.ExitCode -ne 0) {
+                throw "oscdimg 失敗，結束碼 $($burn.ExitCode)：$($burn.StdErr)"
+            }
         }
+        'Folder' {
+            $output = Join-Path -Path $Config.OutputDir -ChildPath ($isoName -replace '\.iso$', '')
+            # 不覆寫既有資料夾，即使指定 -Force（與 ISO 不同；刪除遞迴目錄的風險較高，見 Assert-WinMediaNoReparsePoint）
+            if (Test-Path -LiteralPath $output) {
+                throw "輸出資料夾已存在：$output（Folder 形式不覆寫既有資料夾，請改用其他 OutputDir 或刪除後重試）"
+            }
+            if ($isEsd) { Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $installEsd -Config $Config }
+            Invoke-WinMediaOperation -Category File -Operation 'CopyMedia' -Target $output -Config $Config -ScriptBlock {
+                Copy-Item -LiteralPath $mediaDir -Destination $output -Recurse
+            } | Out-Null
+        }
+        'Image' {
+            if ($isEsd) {
+                $output = Join-Path -Path $Config.OutputDir -ChildPath 'install.esd'
+                if ((Test-Path -LiteralPath $output) -and -not $Force) {
+                    throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
+                }
+                Export-WinMediaEsd -SourceWim $installWim -DestinationEsd $output -Config $Config
+            }
+            else {
+                $output = Join-Path -Path $Config.OutputDir -ChildPath 'install.wim'
+                if ((Test-Path -LiteralPath $output) -and -not $Force) {
+                    throw "輸出已存在：$output（使用 -Force 覆寫，§3.3）"
+                }
+                Invoke-WinMediaOperation -Category File -Operation 'MoveImage' -Target $output -Config $Config -ScriptBlock {
+                    Move-Item -LiteralPath $installWim -Destination $output -Force:$Force
+                } | Out-Null
+            }
+        }
+        default { throw "不支援的 OutputForm：$($plan.OutputForm)" }
     }
 
     # 步驟 12：成功後才清除工作子目錄；logs 保留

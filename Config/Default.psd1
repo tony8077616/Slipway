@@ -9,6 +9,13 @@
     ResetBase            = $false
     ResetBaseOS          = $false
     OutputFormat         = 'WIM'                 # 'WIM' 或 'ESD'
+    OutputForm           = ''                    # 輸出形式：'' = 自動（一般來源 Iso；.esd 來源改用 Image 並警告）；明確指定 'Iso'／'Folder'／'Image'（.esd 來源只允許 Image）
+    ScratchDirectory     = ''                    # DISM 暫存目錄（-ScratchDirectory）；空白 = 不傳；須為本機路徑，且不得位於 MountDir 或 WorkDir\media 之內
+    MountOptimize        = $false                # 掛載時加 -Optimize
+    MountCheckIntegrity  = $false                # 掛載時加 -CheckIntegrity
+    MountParallelCount   = 1                     # 同時掛載的 index 數；1 = 現行的單一程序流程
+    MountSpaceEstimateGB = 30                    # 每個掛載需求的估計空間（GB）；僅警告，未實測，不含更新解壓
+    OptimizationTarget   = ''                    # Optimize-WindowsImage 的 -OptimizationTarget；空白 = 不執行（文件只列 WIMBoot，僅適用於 WIMBoot 映像）
     WinPEUpdate          = 'SafeOS'              # WinPE（WinRE／boot.wim）核心更新路線：'SafeOS'＝套用 SafeOS DU（已 e2e 驗證，預設）；'Lcu'＝WinRE 套 SSU＋SafeOS DU，boot.wim 另以原始 MSU 直接加入最新 LCU（e2e 實測 KB5127648 判定 Not applicable，無效果）
     UpdateBootFiles      = $true                 # 選項 B（convert-UUP UpdtBootFiles）：改用安裝映像內的 *_EX 開機檔（bootx64、bootmgr、efisys、memtest、boot.stl、fonts、cipolicies）；注意為 UEFI CA 2023 開機檔，韌體 db 沒有 2023 CA 的機器開啟 Secure Boot 可能無法開機
     Wimlib               = @{ Path = '' }        # 非空 = 手動指定 wimlib-imagex.exe，ESD 轉換改用 wimlib；檔案不存在時自動下載 1.14.5（SHA-256 校驗）；空白 = ESD→WIM 用 DISM，WIM→ESD 自動下載至 %LOCALAPPDATA%

@@ -17,14 +17,15 @@ function Get-WinMediaIndexInfo {
     )
 
     # 先固定路徑變數，讓 ScriptBlock 內的使用對靜態分析可見
+    $common = Get-WinMediaDismCommonParameter -Config $Config
     $wimPath = $ImagePath
     $basic = @(Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-        Get-WindowsImage -ImagePath $wimPath -LogLevel $Config.DismLogLevel
+        Get-WindowsImage -ImagePath $wimPath @common -LogLevel $Config.DismLogLevel
     })
     foreach ($item in $basic) {
         $index = [uint32]$item.ImageIndex
         $detail = @(Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Get-WindowsImage -ImagePath $wimPath -Index $index -LogLevel $Config.DismLogLevel
+            Get-WindowsImage -ImagePath $wimPath -Index $index @common -LogLevel $Config.DismLogLevel
         }) | Select-Object -First 1
         # Architecture 為 UInt32：9 = x64（amd64）、12 = ARM64
         $architecture = switch ([uint32]$detail.Architecture) {
