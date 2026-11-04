@@ -199,6 +199,17 @@
     foreach ($outName in 'install.esd', 'install.wim') {
         if ((Get-WinMediaFullPath -Path $SourceIso) -ieq (Get-WinMediaFullPath -Path (Join-Path -Path $Config.OutputDir -ChildPath $outName))) { throw "來源與輸出相同，會被覆寫：$SourceIso" }
     }
+    # 平行路徑的守衛提前到任何登記之前（與後段平行分支內的守衛相同；序列路徑不受影響）
+    if ([int]$Config.MountParallelCount -gt 1) {
+        $earlyParallelDir = Join-Path -Path $workDir -ChildPath 'parallel'
+        if (Test-PathWithin -Child $SourceIso -Parent $earlyParallelDir) { throw "來源映像位於平行工作目錄之內，會被清空：$SourceIso" }
+        if (Test-PathWithin -Child $Config.OutputDir -Parent $earlyParallelDir) { throw "OutputDir 位於平行工作目錄之內，會被清空：$($Config.OutputDir)" }
+        if (Test-PathWithin -Child $mountDir -Parent $earlyParallelDir) { throw "MountDir 位於平行工作目錄之內，會被清空：$mountDir" }
+        if (Test-PathWithin -Child $Config.LogDir -Parent $earlyParallelDir) { throw "LogDir 位於平行工作目錄之內，會被清空：$($Config.LogDir)" }
+        if (Test-PathWithin -Child $Config.LogFile -Parent $earlyParallelDir) { throw "LogFile 位於平行工作目錄之內，會被清空：$($Config.LogFile)" }
+        if (Test-PathWithin -Child $Config.OperationLog -Parent $earlyParallelDir) { throw "OperationLog 位於平行工作目錄之內，會被清空：$($Config.OperationLog)" }
+        if ($Config.ContainsKey('ScratchDirectory') -and -not [string]::IsNullOrWhiteSpace($Config.ScratchDirectory) -and (Test-PathWithin -Child $Config.ScratchDirectory -Parent $earlyParallelDir)) { throw "ScratchDirectory 位於平行工作目錄之內，會被清空：$($Config.ScratchDirectory)" }
+    }
     Assert-WinMediaOutputDir -OutputDir $Config.OutputDir -ProtectedDir @($mediaDir, $winreDir, $expandDir, $lxpDir, $stageDir, $mountDir)
     # 掛載目錄若已存在且非空，直接中止，不像 Convert-UUP.cmd:1060 那樣 rmdir 既有目錄
     if ((Test-Path -LiteralPath $mountDir) -and @(Get-ChildItem -LiteralPath $mountDir -Force).Count -gt 0) {
