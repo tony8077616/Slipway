@@ -118,4 +118,17 @@ Describe 'Invoke-WindowsMediaRefresh: 來源分支（ISO 無 install.wim／insta
         Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaIndexInfo -Times 1 -Exactly
         Should -Invoke -ModuleName WinMediaRefresh Mount-WinMediaSourceIso -Times 0 -Exactly
     }
+    It 'ISO 內含 sources\install.wim：直接複製到 media，不轉換，之後停在索引讀取' {
+        $wimSrc = Join-Path -Path $script:root2 -ChildPath 'iso\sources'
+        New-Item -ItemType Directory -Path $wimSrc -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $wimSrc -ChildPath 'install.wim') -Value 'wim'
+        New-Item -ItemType Directory -Path (Join-Path -Path $script:root2 -ChildPath 'work\media') -Force | Out-Null
+        $cfg = Get-SourceBranchConfig -Root $script:root2
+        { Invoke-WindowsMediaRefresh -SourceIso $script:iso -Config $cfg } | Should -Throw '*tripwire: Get-WinMediaIndexInfo*'
+        Should -Invoke -ModuleName WinMediaRefresh Mount-WinMediaSourceIso -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Convert-WinMediaEsdToWim -Times 0 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Copy-WinMediaEsdSource -Times 0 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaIndexInfo -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Dismount-DiskImage -Times 0 -Exactly
+    }
 }
