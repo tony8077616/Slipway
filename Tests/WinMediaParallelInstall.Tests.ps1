@@ -24,7 +24,7 @@ BeforeAll {
     function Assert-InstallMocksLive {
         foreach ($n in @('Start-WinMediaIndexWorker', 'Mount-WinMediaImage', 'Copy-WinMediaUpdatedBootFiles', 'Invoke-WinMediaParallelStage', 'Invoke-WinMediaParallelMerge', 'Invoke-WinMediaParallelMountCleanup', 'Invoke-WinMediaParallelTreeKill', 'Invoke-WinMediaOperation', 'Get-WinMediaParallelSpaceWarning', 'Write-WinMediaLog', 'Start-Sleep')) {
             $type = Invoke-InModule { param($x) (Get-Command -Name $x -ErrorAction Stop).CommandType } @($n)
-            $type | Should -BeIn @('Alias', 'Function', 'Cmdlet') -Because "not resolvable in WinMediaRefresh scope: $n"
+            $type | Should -Be 'Alias' -Because "mock not live in WinMediaRefresh scope: $n"
         }
     }
 }
