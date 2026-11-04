@@ -10,6 +10,36 @@ BeforeAll {
     $script:ifStmt = $script:ast.Find({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -match '\$parallelCount\s+-gt\s+1' }, $true)
 }
 
+Describe 'Parallel: the path guards run early, before any WorkDir registration (AST, Q3 項目 4)' -Tag 'Unit' {
+    BeforeAll {
+        $script:earlyIfs = @($script:ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and $n.Clauses[0].Item1.Extent.Text -match 'MountParallelCount\s+-gt\s+1' }, $true))
+    }
+
+    It 'Parallel: an early guard keyed on MountParallelCount -gt 1 exists and tests the parallel root' {
+        $script:earlyIfs.Count | Should -BeGreaterOrEqual 1
+        $script:earlyIfs[0].Clauses[0].Item2.Extent.Text | Should -Match 'Test-PathWithin'
+    }
+
+    It 'Parallel: the early guard comes before the first Use-WinMediaWorkDir call' {
+        $uses = @($script:ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Use-WinMediaWorkDir' }, $true) | Sort-Object { $_.Extent.StartOffset })
+        $uses.Count | Should -BeGreaterThan 0
+        $script:earlyIfs.Count | Should -BeGreaterOrEqual 1
+        $script:earlyIfs[0].Extent.StartOffset | Should -BeLessThan $uses[0].Extent.StartOffset
+    }
+
+    It 'Parallel: the early guard covers <Expr>' -ForEach @(
+        @{ Expr = 'SourceIso' }
+        @{ Expr = 'Config.OutputDir' }
+        @{ Expr = 'mountDir' }
+        @{ Expr = 'Config.LogDir' }
+        @{ Expr = 'Config.LogFile' }
+        @{ Expr = 'Config.OperationLog' }
+        @{ Expr = 'Config.ScratchDirectory' }
+    ) {
+        $script:earlyIfs[0].Clauses[0].Item2.Extent.Text | Should -Match ([regex]::Escape($Expr))
+    }
+}
+
 Describe 'Parallel: refresh registers WorkDir\parallel only inside the parallel branch (AST)' -Tag 'Unit' {
     It 'Parallel: the $parallelCount -gt 1 branch exists' {
         $script:ifStmt | Should -Not -BeNullOrEmpty
