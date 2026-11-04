@@ -22,7 +22,7 @@ function Invoke-WinMediaParallelInstall {
     $stagingRoot = [IO.Path]::GetPathRoot($ParallelRoot).ToUpperInvariant()
     $freeSpace = @{}
     foreach ($r in @($mountRoot, $stagingRoot | Select-Object -Unique)) {
-        $freeSpace[$r] = [math]::Round((Get-WinMediaDriveInfo -Root $r).AvailableFreeSpace / 1GB, 2)
+        $freeSpace[$r] = try { [math]::Round((Get-WinMediaDriveInfo -Root $r).AvailableFreeSpace / 1GB, 2) } catch { $null }
     }
     $installWimGB = if (Test-Path -LiteralPath $InstallWim -PathType Leaf) { [math]::Round((Get-Item -LiteralPath $InstallWim).Length / 1GB, 2) } else { 0 }
     $stagingGB = Get-WinMediaParallelStagingGB -Targets $Targets -InstallWimGB $installWimGB
