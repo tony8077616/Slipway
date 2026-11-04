@@ -284,6 +284,18 @@ Describe 'Parallel install: behaviour' {
         Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 1 -and $EstimateGB -eq 65 }
     }
 
+    It 'a failing free-space probe stores null (Unknown) instead of aborting the run' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops -SpaceLow $false
+        Mock -ModuleName WinMediaRefresh Get-WinMediaDriveInfo { throw 'probe failed' }
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        { Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root } | Should -Not -Throw
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaDriveInfo -Times 1 -Exactly
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { @($FreeSpaceGB.Keys | Where-Object { $null -eq $FreeSpaceGB[$_] }).Count -ge 1 }
+    }
+
     It 'sync mount leaf names are owned by the Step 11 cleanup tool (same pattern the cleanup uses)' {
         Assert-InstallFilePresent
         $wsText = [IO.File]::ReadAllText((Join-Path -Path $script:root -ChildPath 'Modules\WinMediaWorkspace.psm1'))
