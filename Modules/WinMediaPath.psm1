@@ -214,8 +214,48 @@ function Assert-WinMediaLocalPath {
     }
 }
 
+function Get-WinMediaGoogleDriveRootFromState {
+    # 解析 PerAccountPreferences 的 JSON 文字：mount_point_path 為單一磁碟機字母，轉為 X:\；格式不符的項目略過，不外拋
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+
+    try {
+        $state = $Text | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Verbose "Google Drive 狀態 JSON 無法解析：$($_.Exception.Message)"
+        return @()
+    }
+    $prefs = $state.PSObject.Properties['per_account_preferences']
+    if ($null -eq $prefs) { return @() }
+    foreach ($entry in @($prefs.Value)) {
+        try {
+            $mount = $entry.PSObject.Properties['value'].Value.PSObject.Properties['mount_point_path'].Value
+        }
+        catch { continue }
+        if ($mount -is [string] -and $mount -match '^([A-Za-z]):?\\?$') { '{0}:\' -f $Matches[1].ToUpperInvariant() }
+    }
+}
+
+function Get-WinMediaGoogleDriveMountRoot {
+    # Google Drive 桌面版的掛載根（HKCU:\Software\Google\DriveFS 的 PerAccountPreferences，唯讀）；讀取失敗回傳空陣列，不中止執行
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+
+    try {
+        $text = [string](Get-ItemProperty -LiteralPath 'HKCU:\Software\Google\DriveFS' -Name 'PerAccountPreferences' -ErrorAction Stop).PerAccountPreferences
+    }
+    catch {
+        Write-Verbose "讀取 Google Drive 登錄檔失敗：$($_.Exception.Message)"
+        return @()
+    }
+    return @(Get-WinMediaGoogleDriveRootFromState -Text $text)
+}
+
 function Get-WinMediaCloudProvider {
-    # 雲端同步資料夾的供應商表（資料驅動）；目前以環境變數判斷，登錄檔來源待驗證後再加入
+    # 雲端同步資料夾的供應商：OneDrive 以環境變數判斷；Google Drive 以登錄檔的掛載根判斷（唯讀，讀不到即視為非 Google Drive）
     [CmdletBinding()]
     [OutputType([string])]
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
@@ -231,6 +271,10 @@ function Get-WinMediaCloudProvider {
             $rootWithSep = (Get-WinMediaFullPath -Path $root).TrimEnd('\') + '\'
             if ($full.StartsWith($rootWithSep, [System.StringComparison]::OrdinalIgnoreCase)) { return $provider.Name }
         }
+    }
+    foreach ($root in @(Get-WinMediaGoogleDriveMountRoot)) {
+        $rootWithSep = $root.TrimEnd('\') + '\'
+        if ($full.StartsWith($rootWithSep, [System.StringComparison]::OrdinalIgnoreCase)) { return 'Google Drive' }
     }
     return $null
 }

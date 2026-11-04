@@ -45,6 +45,8 @@ Describe 'Get-WinMediaGoogleDriveRootFromState：解析（合成 JSON）' -Tag '
     It '接受 X: 與 X:\ 兩種寫法' {
         $json = '{"per_account_preferences":[{"key":"k","value":{"mount_point_path":"X:\\"}}]}'
         (Invoke-InModule { param($t) Get-WinMediaGoogleDriveRootFromState -Text $t } @($json)) -join ',' | Should -Be 'X:\'
+        $jsonColon = '{"per_account_preferences":[{"key":"k","value":{"mount_point_path":"X:"}}]}'
+        (Invoke-InModule { param($t) Get-WinMediaGoogleDriveRootFromState -Text $t } @($jsonColon)) -join ',' | Should -Be 'X:\'
     }
 
     It '非字母的值被忽略' {
