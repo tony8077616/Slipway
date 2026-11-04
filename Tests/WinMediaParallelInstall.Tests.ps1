@@ -317,15 +317,23 @@ Describe 'Parallel install: behaviour' {
         Register-InstallMock -Ops $ops -SpaceLow $false
         Mock -ModuleName WinMediaRefresh Get-WinMediaParallelStagingGB { 5 }
         Mock -ModuleName WinMediaRefresh Get-WinMediaDriveInfo { [pscustomobject]@{ AvailableFreeSpace = [int64]100GB } }
-        $testRoot = [IO.Path]::GetPathRoot($TestDrive)
-        $other = [IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady -and $_.Name -ne $testRoot } | Select-Object -First 1
-        $script:absentRoot = ([string]$other.Name) + 'mnt-absent'
+        $mapFolder = Join-Path -Path $TestDrive -ChildPath ('elsedrive-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $mapFolder -Force | Out-Null
+        $usedLetters = @(Get-PSDrive -PSProvider FileSystem | ForEach-Object { $_.Name }) + @([IO.DriveInfo]::GetDrives() | ForEach-Object { $_.Name.Substring(0, 1) })
+        $mapLetter = [string](@('Y', 'X', 'W', 'V', 'U', 'T', 'S', 'R', 'Q', 'P', 'N', 'K', 'J', 'I', 'H', 'G', 'F', 'E', 'D') | Where-Object { $_ -notin $usedLetters } | Select-Object -First 1)
+        New-PSDrive -Name $mapLetter -PSProvider FileSystem -Root $mapFolder -Scope Global | Out-Null
+        $script:absentRoot = $mapLetter + ':\mnt-absent'
         $mountOverride = $script:absentRoot
         $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
-        Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root -MountOverride $mountOverride
-        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 2 -Exactly
-        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 2 -and $EstimateGB -eq 30 -and @($Path)[0] -eq $script:absentRoot }
-        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 1 -and $EstimateGB -eq 5 -and @($Path)[0] -like '*\parallel' }
+        try {
+            Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root -MountOverride $mountOverride
+            Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 2 -Exactly
+            Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 2 -and $EstimateGB -eq 30 -and @($Path)[0] -eq $script:absentRoot }
+            Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly -ParameterFilter { $Count -eq 1 -and $EstimateGB -eq 5 -and @($Path)[0] -like '*\parallel' }
+        }
+        finally {
+            Remove-PSDrive -Name $mapLetter -Scope Global -Force
+        }
     }
 
     It 'sync mount leaf names are owned by the Step 11 cleanup tool (same pattern the cleanup uses)' {
