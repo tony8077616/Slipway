@@ -186,3 +186,18 @@ Describe 'Invoke-WinMediaWorkspaceCleanup：根目錄相對 WorkDir（8a60680 �
         Resolve-WinMediaDefenderStatePath -WorkDir 'D:\WinMediaWork' | Should -Match ([regex]::Escape($key) + '\.json$')
     }
 }
+Describe 'Resolve-WinMediaMountDir：根目錄相對 WorkDir 的預設掛載目錄（8a60680 回歸）' -Tag 'Unit' {
+    It '根目錄相對 WorkDir 的預設掛載目錄依 WorkDir 所在磁碟（非系統磁碟）' {
+        Mock -ModuleName WinMediaPath -CommandName Get-Volume { [pscustomobject]@{ FileSystem = 'NTFS' } }
+        $type = & (Get-Module -Name WinMediaPath) { (Get-Command -Name 'Get-Volume' -ErrorAction Stop).CommandType }
+        $type | Should -Be 'Alias' -Because 'Get-Volume mock not live in WinMediaPath scope'
+        $drive = Split-Path -Path $TestDrive -Qualifier
+        Push-Location -LiteralPath 'TestDrive:\'
+        try {
+            Resolve-WinMediaMountDir -WorkDir '\w' | Should -Be ($drive + '\MountUUP')
+        }
+        finally {
+            Pop-Location
+        }
+    }
+}
