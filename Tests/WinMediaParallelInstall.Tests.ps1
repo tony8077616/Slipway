@@ -169,6 +169,24 @@ Describe 'Parallel install: behaviour' {
         Test-Path -LiteralPath (Join-Path -Path $scratch -ChildPath 'idx2') | Should -BeTrue
     }
 
+    It 'Parallel install: a failed scratch removal is logged as a warning and does not stop the merge or the sync' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops
+        Mock -ModuleName WinMediaRefresh Remove-Item { throw 'locked' } -ParameterFilter { $LiteralPath -like '*\scratch\idx*' }
+        $scratch = Join-Path -Path $root -ChildPath 'scratch'
+        New-Item -ItemType Directory -Path (Join-Path -Path $scratch -ChildPath 'idx2') -Force | Out-Null
+        $cfg = Get-InstallTestConfig -Root $root
+        $cfg['ScratchDirectory'] = $scratch
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg $cfg -Kernel $k -Build $b -Boot $bx -Root $root
+        Test-Path -LiteralPath (Join-Path -Path $scratch -ChildPath 'idx2') | Should -BeTrue
+        ($ops -join ',') | Should -Match 'merge'
+        ($ops -join ',') | Should -Match 'mount:2:True'
+        Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' }
+    }
+
     It 'order: stage, one worker per target, merge, then read-only mounts with xmllite on the first target and boot copy per target' {
         Assert-InstallFilePresent
         $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
