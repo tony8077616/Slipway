@@ -14,6 +14,25 @@ function Get-WinMediaParallelCount {
     return [Math]::Max(1, [Math]::Min($Requested, $TargetCount))
 }
 
+function Get-WinMediaParallelStagingGB {
+    # 暫存區需要的空間：每個目標索引一份 idx WIM，加上一份 merged.wim
+    [CmdletBinding()]
+    [OutputType([double])]
+    param(
+        [Parameter(Mandatory = $true)]
+        [int[]]$Targets,
+
+        [Parameter(Mandatory = $true)]
+        [double]$InstallWimGB
+    )
+
+    if ($Targets.Count -eq 0) {
+        throw 'Targets 不可為空。'
+    }
+
+    return [double](($Targets.Count + 1) * $InstallWimGB)
+}
+
 function Get-WinMediaParallelSpaceWarning {
     [CmdletBinding()]
     [OutputType([pscustomobject])]

@@ -100,7 +100,8 @@ Describe 'Parallel install: behaviour' {
             Mock -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning {
                 param($Path, $Count, $EstimateGB, $FreeSpaceGB)
                 $null = $Path, $Count, $EstimateGB, $FreeSpaceGB
-                [pscustomobject]@{ Root = 'C:\'; RequiredGB = 60; FreeGB = 10; Status = $status }
+                $isMount = (@($Path) -join '') -like '*\mnt*'
+                [pscustomobject]@{ Root = 'C:\'; RequiredGB = 60; FreeGB = 10; Status = $(if ($isMount) { $status } else { 'Ok' }) }
             }.GetNewClosure()
         }
 
@@ -255,6 +256,22 @@ Describe 'Parallel install: behaviour' {
         $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
         Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
         Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' }
+    }
+
+    It 'low staging space (idx WIMs plus merged.wim) logs its own warning, separate from the mount drive' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops -SpaceLow $false
+        Mock -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning {
+            param($Path, $Count, $EstimateGB, $FreeSpaceGB)
+            $null = $Count, $EstimateGB, $FreeSpaceGB
+            $isStaging = (@($Path) -join '') -notlike '*\mnt*'
+            [pscustomobject]@{ Root = 'D:\'; RequiredGB = 12; FreeGB = 1; Status = $(if ($isStaging) { 'Low' } else { 'Ok' }) }
+        }
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
+        Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -like '*可用空間可能不足*' }
     }
 
     It 'sync mount leaf names are owned by the Step 11 cleanup tool (same pattern the cleanup uses)' {
