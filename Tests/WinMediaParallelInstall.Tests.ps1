@@ -274,6 +274,16 @@ Describe 'Parallel install: behaviour' {
         Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -like '*可用空間可能不足*' }
     }
 
+    It 'same drive: mount and staging share one combined space check (one warning call)' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops -SpaceLow $false
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
+        Should -Invoke -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning -Times 1 -Exactly
+    }
+
     It 'sync mount leaf names are owned by the Step 11 cleanup tool (same pattern the cleanup uses)' {
         Assert-InstallFilePresent
         $wsText = [IO.File]::ReadAllText((Join-Path -Path $script:root -ChildPath 'Modules\WinMediaWorkspace.psm1'))
