@@ -409,6 +409,8 @@ function Resolve-WinMediaMountDir {
         [string]$MountDir
     )
 
+    # 根目錄相對 WorkDir（如 \w）須先補成完整路徑，否則 GetPathRoot 取得的是 \，預設會落到系統磁碟
+    if ($WorkDir) { $WorkDir = Get-WinMediaFullPath -Path $WorkDir }
     if (-not [string]::IsNullOrWhiteSpace($MountDir)) {
         $resolved = (ConvertTo-SanitizedPath -Path $MountDir).Path.TrimEnd('\')
     }
@@ -430,7 +432,7 @@ function Resolve-WinMediaMountDir {
     if ($resolved -match '^[A-Za-z]:$') {
         throw "掛載目錄不可為磁碟根目錄：$resolved"
     }
-    return $resolved
+    return (Get-WinMediaFullPath -Path $resolved)
 }
 
 function Use-WinMediaWorkDir {

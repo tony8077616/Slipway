@@ -195,6 +195,7 @@ Describe 'Resolve-WinMediaMountDir：根目錄相對 WorkDir 的預設掛載目�
         Push-Location -LiteralPath 'TestDrive:\'
         try {
             Resolve-WinMediaMountDir -WorkDir '\w' | Should -Be ($drive + '\MountUUP')
+            Should -Invoke -ModuleName WinMediaPath -CommandName Get-Volume -Times 1 -Exactly -ParameterFilter { $DriveLetter -eq $drive.Substring(0, 1) }
         }
         finally {
             Pop-Location
