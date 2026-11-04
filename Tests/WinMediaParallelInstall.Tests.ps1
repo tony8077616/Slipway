@@ -125,6 +125,50 @@ Describe 'Parallel install: behaviour' {
         }
     }
 
+    It 'Parallel install: an empty per-index scratch folder is removed after a successful run' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops
+        $scratch = Join-Path -Path $root -ChildPath 'scratch'
+        New-Item -ItemType Directory -Path (Join-Path -Path $scratch -ChildPath 'idx2') -Force | Out-Null
+        $cfg = Get-InstallTestConfig -Root $root
+        $cfg['ScratchDirectory'] = $scratch
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg $cfg -Kernel $k -Build $b -Boot $bx -Root $root
+        Test-Path -LiteralPath (Join-Path -Path $scratch -ChildPath 'idx2') | Should -BeFalse
+    }
+
+    It 'Parallel install: a non-empty per-index scratch folder is kept and logged as a warning' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops
+        $scratch = Join-Path -Path $root -ChildPath 'scratch'
+        New-Item -ItemType Directory -Path (Join-Path -Path $scratch -ChildPath 'idx3') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path -Path $scratch -ChildPath 'idx3\keep.txt') -Force | Out-Null
+        $cfg = Get-InstallTestConfig -Root $root
+        $cfg['ScratchDirectory'] = $scratch
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg $cfg -Kernel $k -Build $b -Boot $bx -Root $root
+        Test-Path -LiteralPath (Join-Path -Path $scratch -ChildPath 'idx3\keep.txt') | Should -BeTrue
+        Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' }
+    }
+
+    It 'Parallel install: a failed child leaves its per-index scratch folder for diagnosis' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops -ExitCodes @{ 3 = 1 }
+        $scratch = Join-Path -Path $root -ChildPath 'scratch'
+        New-Item -ItemType Directory -Path (Join-Path -Path $scratch -ChildPath 'idx2') -Force | Out-Null
+        $cfg = Get-InstallTestConfig -Root $root
+        $cfg['ScratchDirectory'] = $scratch
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        { Invoke-InstallCase -Cfg $cfg -Kernel $k -Build $b -Boot $bx -Root $root } | Should -Throw
+        Test-Path -LiteralPath (Join-Path -Path $scratch -ChildPath 'idx2') | Should -BeTrue
+    }
+
     It 'order: stage, one worker per target, merge, then read-only mounts with xmllite on the first target and boot copy per target' {
         Assert-InstallFilePresent
         $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
