@@ -87,4 +87,16 @@ Describe 'Invoke-WindowsMediaRefresh: non-admin throws before any side effect (r
         }
         Should -Invoke -ModuleName WinMediaRefresh Resolve-WinMediaLogLocation -Times 1 -Exactly -ParameterFilter { $Config.LogDir -notlike '\*' -and $Config.LogDir -like '*\nonadmin-work\logs' }
     }
+
+    It '根目錄相對的 -MountDir（\nonadmin-mnt）在管理員檢查之前正規化為完整路徑' {
+        $cfg = Get-NonAdminTestConfig -Root $script:root2
+        Push-Location -LiteralPath 'TestDrive:\'
+        try {
+            { Invoke-WindowsMediaRefresh -SourceIso $script:iso -Config $cfg -MountDir '\nonadmin-mnt' } | Should -Throw '*需要系統管理員權限*'
+        }
+        finally {
+            Pop-Location
+        }
+        Should -Invoke -ModuleName WinMediaRefresh Assert-WinMediaLocalPath -Times 1 -Exactly -ParameterFilter { $Name -eq 'MountDir' -and $Path -notlike '\*' -and $Path -like '*\nonadmin-mnt' }
+    }
 }
