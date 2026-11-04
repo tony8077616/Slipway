@@ -35,6 +35,12 @@ Describe 'WinMediaPath 網路路徑政策' -Tag 'Unit' {
         { Assert-WinMediaLocalPath -Path '\\server\share' -Name 'WorkDir' } | Should -Throw '*WorkDir 不支援網路路徑*'
     }
 
+    It '對應到網路磁碟機的磁碟區為網路路徑（磁碟資訊經由可 mock 的包裝取得）' {
+        Mock -ModuleName WinMediaPath Get-WinMediaDriveInfo { [pscustomobject]@{ DriveType = [System.IO.DriveType]::Network } }
+        Test-WinMediaNetworkPath -Path 'Q:\x' | Should -BeTrue
+        { Assert-WinMediaLocalPath -Path 'Q:\x' -Name 'WorkDir' } | Should -Throw '*WorkDir 不支援網路路徑*'
+    }
+
     It 'Assert-WinMediaLocalPath 對本機路徑不丟出' {
         { Assert-WinMediaLocalPath -Path $TestDrive -Name 'WorkDir' } | Should -Not -Throw
     }
