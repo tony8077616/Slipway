@@ -227,6 +227,7 @@ function Get-WinMediaGoogleDriveRootFromState {
         Write-Verbose "Google Drive 狀態 JSON 無法解析：$($_.Exception.Message)"
         return @()
     }
+    if ($null -eq $state) { return @() }
     $prefs = $state.PSObject.Properties['per_account_preferences']
     if ($null -eq $prefs) { return @() }
     foreach ($entry in @($prefs.Value)) {

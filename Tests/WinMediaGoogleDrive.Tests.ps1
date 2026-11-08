@@ -22,6 +22,10 @@ Describe 'Get-WinMediaCloudProvider：Google Drive 掛載根' -Tag 'Unit' {
         $type | Should -Be 'Alias' -Because 'mock not live in WinMediaPath scope'
     }
 
+    It 'Google Drive 狀態為空、空白或 null 時不拋出例外，回傳空結果' -ForEach @(@{ Text = '' }, @{ Text = '   ' }, @{ Text = 'null' }) {
+        Invoke-InModule { param($t) @(Get-WinMediaGoogleDriveRootFromState -Text $t).Count } @($Text) | Should -Be 0
+    }
+
     It '位於 Google Drive 掛載根之下時回傳 Google Drive' {
         Get-WinMediaCloudProvider -Path 'G:\WinMediaWork' | Should -Be 'Google Drive'
     }

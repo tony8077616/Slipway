@@ -1,5 +1,26 @@
 ﻿# Step 12c-3b：平行安裝索引（匯出 → 排程 → 合併 → 唯讀掛載依序同步 xmllite 與開機檔）（不匯出）
 
+function Clear-WinMediaParallelJobLog {
+    # 每次執行前刪除上次留在索引目錄的子程序 log（記錄只會追加，不清除就會被重複併入）；只刪 idxN 目錄內的 worker.log 與 OperationLog.txt，且不得與父程序的 log 相同
+    param(
+        [Parameter(Mandatory)][hashtable]$JobConfig,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    $parentPaths = @([string]$Config['LogFile'], [string]$Config['OperationLog']) | Where-Object { $_ }
+    foreach ($key in 'LogFile', 'OperationLog') {
+        $path = [string]$JobConfig[$key]
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $leaf = Split-Path -Path $path -Leaf
+        $folder = Split-Path -Path (Split-Path -Path $path -Parent) -Leaf
+        if ($folder -notmatch '^idx\d+$' -or $leaf -notin @('worker.log', 'OperationLog.txt')) { continue }
+        if (@($parentPaths | Where-Object { $_ -ieq $path }).Count -gt 0) { continue }
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try { Remove-Item -LiteralPath $path -Force }
+        catch { Write-WinMediaLog -Config $Config -Level Warning -Message "無法刪除上次的工作程序記錄：$path（$($_.Exception.Message)）" }
+    }
+}
+
 function Merge-WinMediaParallelJobLog {
     # 把索引工作程序的 LogFile（worker.log）與 OperationLog 依序附加到父程序的同名檔案，前面加分隔標題；來源不存在或為空則略過
     param(
@@ -69,6 +90,7 @@ function Invoke-WinMediaParallelInstall {
     Invoke-WinMediaParallelStage -SourceWim $InstallWim -Targets $Targets -ParallelRoot $ParallelRoot -Config $Config
     $planned = @(Get-WinMediaParallelJob -BaseJob $BaseJob -Targets $Targets -ParallelRoot $ParallelRoot)
     $jobs = @($planned | ForEach-Object { [pscustomobject]@{ Index = $_.OriginalIndex; IndexDir = $_.IndexDir; MountPath = $_.Job.MountPath; Job = $_.Job } })
+    foreach ($j in $jobs) { Clear-WinMediaParallelJobLog -JobConfig $j.Job['Config'] -Config $Config }
     try {
         $results = @(Invoke-WinMediaParallelRun -Jobs $jobs -Config $Config -MaxConcurrent $MaxConcurrent)
     }

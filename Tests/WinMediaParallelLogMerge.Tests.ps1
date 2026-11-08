@@ -59,6 +59,48 @@ Describe 'Parallel job log merge' -Tag 'Unit' {
         Test-Path -LiteralPath $parentOp | Should -BeFalse
     }
 
+    It 'Parallel: 執行前刪除 idxN 目錄內上次的 worker.log 與 OperationLog.txt' {
+        $dir = Join-Path $TestDrive 'clear-ok'
+        $wl = Join-Path $dir 'idx2\worker.log'
+        $op = Join-Path $dir 'idx2\OperationLog.txt'
+        Write-TestText -Path $wl -Text "old-child-line`r`n"
+        Write-TestText -Path $op -Text "old-op-line`r`n"
+
+        Invoke-InModule { param($jc, $pc) Clear-WinMediaParallelJobLog -JobConfig $jc -Config $pc } @(
+            @{ LogFile = $wl; OperationLog = $op }, @{ LogFile = (Join-Path $dir 'parent.log'); OperationLog = '' })
+
+        Test-Path -LiteralPath $wl | Should -BeFalse
+        Test-Path -LiteralPath $op | Should -BeFalse
+    }
+
+    It 'Parallel: 清除守衛保留不在 idxN 目錄內的檔案，以及與父程序 log 相同的路徑' {
+        $dir = Join-Path $TestDrive 'clear-guard'
+        $notIdx = Join-Path $dir 'other\worker.log'
+        $sameAsParent = Join-Path $dir 'idx4\worker.log'
+        Write-TestText -Path $notIdx -Text "keep-a`r`n"
+        Write-TestText -Path $sameAsParent -Text "keep-b`r`n"
+
+        Invoke-InModule { param($jc, $pc) Clear-WinMediaParallelJobLog -JobConfig $jc -Config $pc } @(
+            @{ LogFile = $notIdx; OperationLog = '' }, @{ LogFile = $sameAsParent; OperationLog = '' })
+        Invoke-InModule { param($jc, $pc) Clear-WinMediaParallelJobLog -JobConfig $jc -Config $pc } @(
+            @{ LogFile = $sameAsParent; OperationLog = '' }, @{ LogFile = $sameAsParent; OperationLog = '' })
+
+        Test-Path -LiteralPath $notIdx | Should -BeTrue
+        Test-Path -LiteralPath $sameAsParent | Should -BeTrue
+    }
+
+    It 'Parallel: 清除 log 的呼叫位於 Invoke-WinMediaParallelRun 之前（AST）' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:helperFile, [ref]$null, [ref]$null)
+        $fn = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-WinMediaParallelInstall' }, $true))
+        $fn.Count | Should -Be 1
+        $calls = @($fn[0].Body.FindAll({ param($c) $c -is [System.Management.Automation.Language.CommandAst] }, $true))
+        $clear = @($calls | Where-Object { $_.GetCommandName() -eq 'Clear-WinMediaParallelJobLog' })
+        $run = @($calls | Where-Object { $_.GetCommandName() -eq 'Invoke-WinMediaParallelRun' })
+        $clear.Count | Should -BeGreaterThan 0
+        $run.Count | Should -Be 1
+        $clear[0].Extent.StartOffset | Should -BeLessThan $run[0].Extent.StartOffset
+    }
+
     It 'Parallel: 併入位於 Invoke-WinMediaParallelRun 的 finally 區塊內，因此失敗的索引也會併入（AST）' {
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:helperFile, [ref]$null, [ref]$null)
         $tries = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.TryStatementAst] }, $true))
