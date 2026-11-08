@@ -1,5 +1,30 @@
 ﻿# Step 12c-3b：平行安裝索引（匯出 → 排程 → 合併 → 唯讀掛載依序同步 xmllite 與開機檔）（不匯出）
 
+function Merge-WinMediaParallelJobLog {
+    # 把索引工作程序的 LogFile（worker.log）與 OperationLog 依序附加到父程序的同名檔案，前面加分隔標題；來源不存在或為空則略過
+    param(
+        [Parameter(Mandatory)][hashtable]$JobConfig,
+        [Parameter(Mandatory)][int]$Index,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    # OperationLog 每行是 key=value 欄位（WinMediaOperation），因此只附加原始行，分隔標題只寫入 LogFile
+    $pairs = @(@{ From = [string]$JobConfig['LogFile']; To = [string]$Config['LogFile']; Header = $true })
+    if (-not [string]::IsNullOrWhiteSpace([string]$Config['OperationLog'])) {
+        $pairs += @{ From = [string]$JobConfig['OperationLog']; To = [string]$Config['OperationLog']; Header = $false }
+    }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    foreach ($p in $pairs) {
+        if ([string]::IsNullOrWhiteSpace($p.From) -or [string]::IsNullOrWhiteSpace($p.To)) { continue }
+        if (-not (Test-Path -LiteralPath $p.From -PathType Leaf)) { continue }
+        $text = [IO.File]::ReadAllText($p.From, $utf8)
+        if ([string]::IsNullOrEmpty($text)) { continue }
+        $body = if ($p.Header) { ('----- 平行索引 {0} 的工作程序記錄（{1}）-----{2}' -f $Index, $p.From, [Environment]::NewLine) + $text } else { $text }
+        if (-not $body.EndsWith("`n")) { $body += [Environment]::NewLine }
+        [IO.File]::AppendAllText($p.To, $body, $utf8)
+    }
+}
+
 function Invoke-WinMediaParallelInstall {
     param(
         [Parameter(Mandatory)][string]$InstallWim,
@@ -34,15 +59,26 @@ function Invoke-WinMediaParallelInstall {
         $spaceWarnings = @(Get-WinMediaParallelSpaceWarning -Path @($MountDir) -Count $MaxConcurrent -EstimateGB $Config.MountSpaceEstimateGB -FreeSpaceGB $freeSpace) + @(Get-WinMediaParallelSpaceWarning -Path @($ParallelRoot) -Count 1 -EstimateGB $stagingGB -FreeSpaceGB $freeSpace)
     }
     foreach ($w in $spaceWarnings) {
+        $free = if ($null -eq $w.FreeGB) { '無法讀取' } else { '{0} GB' -f $w.FreeGB }
+        Write-WinMediaLog -Config $Config -Level Info -Message ('平行掛載空間檢查：{0} 估計需要約 {1} GB（未實測，不含更新檔解壓縮展開，實際需求視測試而定），可用 {2}，狀態 {3}' -f $w.Root, $w.RequiredGB, $free, $w.Status)
         if ($w.Status -eq 'Low') {
-            Write-WinMediaLog -Config $Config -Level Warning -Message "平行掛載的可用空間可能不足：$($w.Root) 需要約 $($w.RequiredGB) GB，可用 $($w.FreeGB) GB"
+            Write-WinMediaLog -Config $Config -Level Warning -Message ('平行掛載的可用空間可能不足（估計未實測，不含更新檔解壓縮展開）：{0} 估計需要約 {1} GB，可用 {2}' -f $w.Root, $w.RequiredGB, $free)
         }
     }
 
     Invoke-WinMediaParallelStage -SourceWim $InstallWim -Targets $Targets -ParallelRoot $ParallelRoot -Config $Config
     $planned = @(Get-WinMediaParallelJob -BaseJob $BaseJob -Targets $Targets -ParallelRoot $ParallelRoot)
     $jobs = @($planned | ForEach-Object { [pscustomobject]@{ Index = $_.OriginalIndex; IndexDir = $_.IndexDir; MountPath = $_.Job.MountPath; Job = $_.Job } })
-    $results = @(Invoke-WinMediaParallelRun -Jobs $jobs -Config $Config -MaxConcurrent $MaxConcurrent)
+    try {
+        $results = @(Invoke-WinMediaParallelRun -Jobs $jobs -Config $Config -MaxConcurrent $MaxConcurrent)
+    }
+    finally {
+        # 成功或失敗都併入：失敗的索引正是最需要其 log 的時候；併入失敗只記警告，不遮蓋原本的錯誤
+        foreach ($j in $jobs) {
+            try { Merge-WinMediaParallelJobLog -JobConfig $j.Job['Config'] -Index $j.Index -Config $Config }
+            catch { Write-WinMediaLog -Config $Config -Level Warning -Message "無法併入索引 $($j.Index) 的工作程序 log：$($_.Exception.Message)" }
+        }
+    }
     Invoke-WinMediaParallelMerge -SourceWim $InstallWim -AllIndexes $AllIndexes -Targets $Targets -ParallelRoot $ParallelRoot -Config $Config
 
     $first = @($results | Where-Object { $_.Index -eq $Targets[0] })[0]

@@ -270,7 +270,23 @@ Describe 'Parallel install: behaviour' {
         }
         $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
         Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
-        Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -like '*可用空間可能不足*' }
+        Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -like '*可用空間可能不足*' -and $Message -like '*未實測*' -and $Message -like '*不含更新檔解壓縮展開*' }
+    }
+
+    It 'every space check logs an Info line; an unreadable free space is reported as 無法讀取' {
+        Assert-InstallFilePresent
+        $root = Join-Path -Path $TestDrive -ChildPath ([guid]::NewGuid().ToString('N'))
+        $ops = [System.Collections.Generic.List[string]]::new()
+        Register-InstallMock -Ops $ops -SpaceLow $false
+        Mock -ModuleName WinMediaRefresh Get-WinMediaParallelSpaceWarning {
+            param($Path, $Count, $EstimateGB, $FreeSpaceGB)
+            $null = $Path, $Count, $EstimateGB, $FreeSpaceGB
+            [pscustomobject]@{ Root = 'D:\'; RequiredGB = 72; FreeGB = $null; Status = 'Unknown' }
+        }
+        $k = @{ Version = $null }; $b = @{ Info = $null }; $bx = @{ Applied = $false }
+        Invoke-InstallCase -Cfg (Get-InstallTestConfig -Root $root) -Kernel $k -Build $b -Boot $bx -Root $root
+        Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Info' -and $Message -like '*未實測*' -and $Message -like '*無法讀取*' }
+        Should -Invoke -ModuleName WinMediaRefresh Write-WinMediaLog -Times 0 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -like '*可用空間可能不足*' }
     }
 
     It 'same drive: mount and staging share one combined space check (one warning call)' {
