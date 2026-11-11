@@ -216,6 +216,69 @@ Describe 'Install-WinMediaDriver（§3.1、§5.4）' -Tag 'Unit' {
     }
 }
 
+Describe 'Install-WinMediaDriver：AMD WTx64 與同名 W11x64 的注入規則' -Tag 'Unit' {
+    InModuleScope WinMediaDriver {
+        BeforeAll {
+            function Add-AmdFixtureInf {
+                param([string]$OsRoot, [string]$Rel)
+                $p = Join-Path -Path $OsRoot -ChildPath $Rel
+                New-Item -ItemType Directory -Path (Split-Path -Parent $p) -Force | Out-Null
+                Set-Content -LiteralPath $p -Value '[Version]'
+            }
+        }
+
+        BeforeEach {
+            Mock Write-WinMediaLog { }
+            Mock Invoke-WinMediaDism { param([scriptblock]$ScriptBlock) & $ScriptBlock }
+            Mock Add-WindowsDriver { param($Path, $Driver, [switch]$ForceUnsigned) $null = $Path, $Driver, $ForceUnsigned }
+            $script:cfg = @{ LogLevel = 'Info'; DismProvider = 'Inbox'; DismLogLevel = 'Debug'; Drivers = @{ ForceUnsigned = $false } }
+            $script:os = Join-Path -Path $TestDrive -ChildPath ('amd-' + [guid]::NewGuid().ToString('N') + '\OS')
+            New-Item -ItemType Directory -Path $script:os -Force | Out-Null
+            $script:set = @{ OS = [pscustomobject]@{ Path = $script:os; Targets = @{ WinRE = $false; Install = $true; Boot = $false } } }
+        }
+
+        It 'W11x64 注入成功時略過同名 WTx64' {
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Chipset\SFH1.1 Driver\W11x64\amdsfhkmdf\a.inf'
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Chipset\SFH1.1 Driver\WTx64\amdsfhkmdf\a.inf'
+            Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $script:set -ForceUnsigned $false -Config $script:cfg
+            Should -Invoke Add-WindowsDriver -Times 1 -Exactly -ParameterFilter { $Driver -like '*W11x64*' }
+            Should -Invoke Add-WindowsDriver -Times 0 -Exactly -ParameterFilter { $Driver -like '*WTx64*' }
+            Should -Invoke Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Info' -and $Message -like '*略過 WTx64*' }
+        }
+
+        It '沒有同名 W11x64 的 WTx64 會嘗試注入' {
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Other\WTx64\b.inf'
+            Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $script:set -ForceUnsigned $false -Config $script:cfg
+            Should -Invoke Add-WindowsDriver -Times 1 -Exactly -ParameterFilter { $Driver -like '*Other*WTx64*b.inf' }
+        }
+
+        It '同名 W11x64 注入失敗時中止，且不注入 WTx64' {
+            Mock Add-WindowsDriver { param($Driver) if ($Driver -like '*W11x64*') { throw 'boom' } }
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Chipset\SFH1.1 Driver\W11x64\amdsfhkmdf\a.inf'
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Chipset\SFH1.1 Driver\WTx64\amdsfhkmdf\a.inf'
+            { Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $script:set -ForceUnsigned $false -Config $script:cfg } |
+                Should -Throw '*驅動注入失敗*W11x64*'
+            Should -Invoke Add-WindowsDriver -Times 0 -Exactly -ParameterFilter { $Driver -like '*WTx64*' }
+        }
+
+        It '無同名 W11x64 的 WTx64 注入失敗時警告並繼續' {
+            Mock Add-WindowsDriver { param($Driver) if ($Driver -like '*bad*') { throw 'boom' } }
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Other\WTx64\bad\bad.inf'
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Other\WTx64\ok\ok.inf'
+            { Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $script:set -ForceUnsigned $false -Config $script:cfg } | Should -Not -Throw
+            Should -Invoke Add-WindowsDriver -Times 1 -Exactly -ParameterFilter { $Driver -like '*ok.inf' }
+            Should -Invoke Write-WinMediaLog -Times 1 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -like '*bad.inf*' }
+        }
+
+        It '非 WTx64 驅動注入失敗時中止，錯誤訊息含 INF 路徑' {
+            Mock Add-WindowsDriver { param($Driver) if ($Driver -like '*bad*') { throw 'boom' } }
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'Intel\x\bad.inf'
+            { Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $script:set -ForceUnsigned $false -Config $script:cfg } |
+                Should -Throw '*驅動注入失敗*Intel*bad.inf*'
+        }
+    }
+}
+
 Describe 'Invoke-WindowsMediaRefresh 驅動注入位置（§5.9）' -Tag 'Unit' {
     BeforeAll {
         $script:mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
