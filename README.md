@@ -107,11 +107,22 @@
 | `UpdateBootFiles` | `$true` | 選項 B：改用安裝映像內已套用 LCU 的 `_EX` 開機檔（bootx64、bootmgr、efisys、memtest、boot.stl、fonts、cipolicies）。**風險**：這些是 UEFI CA 2023 開機檔，韌體 db 沒有 2023 CA 的機器開啟 Secure Boot 可能無法開機 |
 | `ResetBase` | `$false` | 只作用於 WinRE 的 cleanup；啟用後無法解除安裝更新 |
 | `ResetBaseOS` | `$false` | 作用於 install.wim 各目標索引的 cleanup（`-ResetBase`）；啟用後無法解除安裝更新。必須是布林，字串（例如 `'false'`）會中止。boot.wim 不受影響 |
+| `OutputForm` | 空白 | 輸出形式：空白 = 自動（一般來源輸出 ISO；`.esd` 來源改用 Image 並警告）；明確指定 `Iso`、`Folder` 或 `Image`。`.esd` 來源只允許 `Image`，指定 `Iso` 或 `Folder` 會中止 |
+| `ScratchDirectory` | 空白 | DISM 暫存目錄（`-ScratchDirectory`）；空白 = 不傳。須為本機路徑，且不得位於 MountDir 或 `WorkDir\media` 之內；不存在時由工具建立 |
+| `MountOptimize` | `$false` | 掛載可寫映像時加 `-Optimize`（唯讀掛載與 Remount 不帶）。必須是布林 |
+| `MountCheckIntegrity` | `$false` | 掛載可寫映像時加 `-CheckIntegrity`（唯讀掛載與 Remount 不帶）。必須是布林 |
+| `MountParallelCount` | `1` | 同時掛載的 index 數。`1` = 現行的單一程序流程（不變）；大於 1 時改為平行：每個 index 匯出成單一索引 WIM 後由獨立的 Windows PowerShell 程序處理，最後合併。實際數量 = min(此值, 選取的 index 數)。未在實機上驗證 |
+| `MountSpaceEstimateGB` | `30` | 每個掛載需要的估計空間（GB），平行路徑依磁碟區加總。只警告、不拒絕；數字未實測，也不含更新檔解壓縮所需的空間 |
+| `OptimizationTarget` | 空白 | `Optimize-WindowsImage` 的 `-OptimizationTarget`，原樣傳給 DISM、不做值的驗證；空白 = 不執行。文件只列出 WIMBoot，且僅適用於 WIMBoot 映像 |
 | `Languages` | `@('ja-JP')` | 要保留的語言（語言包與 FoD 依此過濾） |
 | `Indexes` | `@()` | 要更新的 install.wim 索引；空陣列 = 全部 |
 | `VirtualEditions` | `@()` | 要建立的虛擬版本（例如 `@('IoTEnterpriseS')`）；建立時來源為 EnterpriseS 索引 |
 | `DeleteSourceEdition` | `$false` | 建立虛擬版本後是否刪除 EnterpriseS |
 | `DefenderExclusions` | `$false` | 執行期間把 WorkDir、MountDir、OutputDir 加入 Windows Defender 排除，結束時只還原本次新增的項目；需系統管理員權限 |
+| `LogLevel` | `Info` | 工具日誌的等級：`Error`、`Warning`、`Info`、`Verbose`、`Debug` |
+| `DismLogLevel` | `WarningsInfo` | DISM cmdlet 的 `-LogLevel`，名稱而非數字：`Errors`、`Warnings`、`WarningsInfo`、`Debug` |
+| `DismUseWindowsPowerShell` | `$true` | 在 pwsh 7 執行時，以 `Import-Module -UseWindowsPowerShell` 相容模式匯入 DISM；`$false` = 開工前中止並提示改用 Windows PowerShell 5.1。Windows PowerShell 5.1 忽略此項 |
+| `DebugTrace` | `0` | 除錯追蹤等級 0–3，各等級的細節見 `Config\Default.psd1` 的註解 |
 | `Lang.Path` | 空白 | 語言包資料夾（遞迴，只取 `.cab`）；空白 = 執行腳本所在目錄\`Lang`（不存在則停用） |
 | `Fod.Path` | 空白 | FoD 資料夾（遞迴，只取 `.cab`）；空白 = 執行腳本所在目錄\`Fod`（不存在則停用） |
 | `StoreApps.Path` | 空白 | StoreApps 資料夾；空白 = 執行腳本所在目錄\`StoreApps`（不存在則停用），每個套件須通過 Microsoft 簽章驗證 |

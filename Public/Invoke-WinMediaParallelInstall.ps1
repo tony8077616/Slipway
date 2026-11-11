@@ -1,0 +1,140 @@
+﻿# Step 12c-3b：平行安裝索引（匯出 → 排程 → 合併 → 唯讀掛載依序同步 xmllite 與開機檔）（不匯出）
+
+function Clear-WinMediaParallelJobLog {
+    # 每次執行前刪除上次留在索引目錄的子程序 log（記錄只會追加，不清除就會被重複併入）；只刪 idxN 目錄內的 worker.log 與 OperationLog.txt，且不得與父程序的 log 相同
+    param(
+        [Parameter(Mandatory)][hashtable]$JobConfig,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    $parentPaths = @([string]$Config['LogFile'], [string]$Config['OperationLog']) | Where-Object { $_ }
+    foreach ($key in 'LogFile', 'OperationLog') {
+        $path = [string]$JobConfig[$key]
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $leaf = Split-Path -Path $path -Leaf
+        $folder = Split-Path -Path (Split-Path -Path $path -Parent) -Leaf
+        if ($folder -notmatch '^idx\d+$' -or $leaf -notin @('worker.log', 'OperationLog.txt')) { continue }
+        if (@($parentPaths | Where-Object { $_ -ieq $path }).Count -gt 0) { continue }
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        try { Remove-Item -LiteralPath $path -Force }
+        catch { Write-WinMediaLog -Config $Config -Level Warning -Message "無法刪除上次的工作程序記錄：$path（$($_.Exception.Message)）" }
+    }
+}
+
+function Merge-WinMediaParallelJobLog {
+    # 把索引工作程序的 LogFile（worker.log）與 OperationLog 依序附加到父程序的同名檔案，前面加分隔標題；來源不存在或為空則略過
+    param(
+        [Parameter(Mandatory)][hashtable]$JobConfig,
+        [Parameter(Mandatory)][int]$Index,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    # OperationLog 每行是 key=value 欄位（WinMediaOperation），因此只附加原始行，分隔標題只寫入 LogFile
+    $pairs = @(@{ From = [string]$JobConfig['LogFile']; To = [string]$Config['LogFile']; Header = $true })
+    if (-not [string]::IsNullOrWhiteSpace([string]$Config['OperationLog'])) {
+        $pairs += @{ From = [string]$JobConfig['OperationLog']; To = [string]$Config['OperationLog']; Header = $false }
+    }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    foreach ($p in $pairs) {
+        if ([string]::IsNullOrWhiteSpace($p.From) -or [string]::IsNullOrWhiteSpace($p.To)) { continue }
+        if (-not (Test-Path -LiteralPath $p.From -PathType Leaf)) { continue }
+        $text = [IO.File]::ReadAllText($p.From, $utf8)
+        if ([string]::IsNullOrEmpty($text)) { continue }
+        $body = if ($p.Header) { ('----- 平行索引 {0} 的工作程序記錄（{1}）-----{2}' -f $Index, $p.From, [Environment]::NewLine) + $text } else { $text }
+        if (-not $body.EndsWith("`n")) { $body += [Environment]::NewLine }
+        [IO.File]::AppendAllText($p.To, $body, $utf8)
+    }
+}
+
+function Invoke-WinMediaParallelInstall {
+    param(
+        [Parameter(Mandatory)][string]$InstallWim,
+        [Parameter(Mandatory)][int[]]$AllIndexes,
+        [Parameter(Mandatory)][int[]]$Targets,
+        [Parameter(Mandatory)][string]$ParallelRoot,
+        [Parameter(Mandatory)][string]$MountDir,
+        [Parameter(Mandatory)][hashtable]$BaseJob,
+        [Parameter(Mandatory)][hashtable]$Config,
+        [Parameter(Mandatory)][string]$SourcesDir,
+        [Parameter(Mandatory)][string]$MediaDir,
+        [Parameter(Mandatory)][int]$MaxConcurrent,
+        [Parameter(Mandatory)][hashtable]$InstallKernel,
+        [Parameter(Mandatory)][hashtable]$BuildInfo,
+        [Parameter(Mandatory)][hashtable]$BootEx,
+        [bool]$IsEsdSource
+    )
+
+    $mountRoot = [IO.Path]::GetPathRoot($MountDir).ToUpperInvariant()
+    $stagingRoot = [IO.Path]::GetPathRoot($ParallelRoot).ToUpperInvariant()
+    $freeSpace = @{}
+    foreach ($r in @($mountRoot, $stagingRoot | Select-Object -Unique)) {
+        $freeSpace[$r] = try { [math]::Round((Get-WinMediaDriveInfo -Root $r).AvailableFreeSpace / 1GB, 2) } catch { $null }
+    }
+    $installWimGB = if (Test-Path -LiteralPath $InstallWim -PathType Leaf) { [math]::Round((Get-Item -LiteralPath $InstallWim).Length / 1GB, 2) } else { 0 }
+    $stagingGB = Get-WinMediaParallelStagingGB -Targets $Targets -InstallWimGB $installWimGB
+    if ($mountRoot -eq $stagingRoot) {
+        # 同一磁碟：掛載與暫存共用剩餘空間，需求加總成一次檢查
+        $spaceWarnings = @(Get-WinMediaParallelSpaceWarning -Path @($MountDir) -Count 1 -EstimateGB ([double]($MaxConcurrent * $Config.MountSpaceEstimateGB) + $stagingGB) -FreeSpaceGB $freeSpace)
+    }
+    else {
+        $spaceWarnings = @(Get-WinMediaParallelSpaceWarning -Path @($MountDir) -Count $MaxConcurrent -EstimateGB $Config.MountSpaceEstimateGB -FreeSpaceGB $freeSpace) + @(Get-WinMediaParallelSpaceWarning -Path @($ParallelRoot) -Count 1 -EstimateGB $stagingGB -FreeSpaceGB $freeSpace)
+    }
+    foreach ($w in $spaceWarnings) {
+        $free = if ($null -eq $w.FreeGB) { '無法讀取' } else { '{0} GB' -f $w.FreeGB }
+        Write-WinMediaLog -Config $Config -Level Info -Message ('平行掛載空間檢查：{0} 估計需要約 {1} GB（未實測，不含更新檔解壓縮展開，實際需求視測試而定），可用 {2}，狀態 {3}' -f $w.Root, $w.RequiredGB, $free, $w.Status)
+        if ($w.Status -eq 'Low') {
+            Write-WinMediaLog -Config $Config -Level Warning -Message ('平行掛載的可用空間可能不足（估計未實測，不含更新檔解壓縮展開）：{0} 估計需要約 {1} GB，可用 {2}' -f $w.Root, $w.RequiredGB, $free)
+        }
+    }
+
+    Invoke-WinMediaParallelStage -SourceWim $InstallWim -Targets $Targets -ParallelRoot $ParallelRoot -Config $Config
+    $planned = @(Get-WinMediaParallelJob -BaseJob $BaseJob -Targets $Targets -ParallelRoot $ParallelRoot)
+    $jobs = @($planned | ForEach-Object { [pscustomobject]@{ Index = $_.OriginalIndex; IndexDir = $_.IndexDir; MountPath = $_.Job.MountPath; Job = $_.Job } })
+    foreach ($j in $jobs) { Clear-WinMediaParallelJobLog -JobConfig $j.Job['Config'] -Config $Config }
+    try {
+        $results = @(Invoke-WinMediaParallelRun -Jobs $jobs -Config $Config -MaxConcurrent $MaxConcurrent)
+    }
+    finally {
+        # 成功或失敗都併入：失敗的索引正是最需要其 log 的時候；併入失敗只記警告，不遮蓋原本的錯誤
+        foreach ($j in $jobs) {
+            try { Merge-WinMediaParallelJobLog -JobConfig $j.Job['Config'] -Index $j.Index -Config $Config }
+            catch { Write-WinMediaLog -Config $Config -Level Warning -Message "無法併入索引 $($j.Index) 的工作程序 log：$($_.Exception.Message)" }
+        }
+    }
+    Invoke-WinMediaParallelMerge -SourceWim $InstallWim -AllIndexes $AllIndexes -Targets $Targets -ParallelRoot $ParallelRoot -Config $Config
+
+    $first = @($results | Where-Object { $_.Index -eq $Targets[0] })[0]
+    $InstallKernel.Version = $first.KernelVersion
+    $BuildInfo.Info = $first.BuildInfo
+
+    # 與序列路徑相同的順序：每個目標先 xmllite（只有第一個）再開機檔；唯讀掛載只讀取，不改動合併後的檔案
+    $needBoot = (-not $IsEsdSource) -and ((-not $Config.ContainsKey('UpdateBootFiles')) -or [bool]$Config.UpdateBootFiles)
+    $syncTargets = if ($needBoot) { $Targets } else { @($Targets[0]) }
+    $xmlTarget = $SourcesDir
+    $mediaTarget = $MediaDir
+    $bootState = $BootEx
+    foreach ($t in $syncTargets) {
+        Mount-WinMediaImage -ImagePath $InstallWim -Index $t -MountPath (Join-Path -Path $MountDir -ChildPath 'winre-src') -ReadOnly -Config $Config -Action {
+            param($mounted)
+            if ($t -eq $Targets[0]) {
+                Invoke-WinMediaOperation -Category File -Operation 'CopyXmlLite' -Target $xmlTarget -Config $Config -ScriptBlock {
+                    Copy-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\xmllite.dll') -Destination (Join-Path -Path $xmlTarget -ChildPath 'xmllite.dll') -Force
+                } | Out-Null
+            }
+            if ($needBoot) { $bootState.Applied = Copy-WinMediaUpdatedBootFiles -MountPath $mounted -MediaDir $mediaTarget -Config $Config }
+        } | Out-Null
+    }
+
+    # 只在全部成功且合併、同步完成後清理：失敗時已先丟例外，保留各索引的暫存目錄供診斷；刪除失敗只記警告
+    foreach ($j in $jobs) {
+        $jc = $j.Job.Config
+        if (-not $jc.ContainsKey('ScratchDirectory') -or [string]::IsNullOrWhiteSpace([string]$jc['ScratchDirectory'])) { continue }
+        $sd = [string]$jc['ScratchDirectory']
+        if ((Split-Path -Path $sd -Leaf) -notmatch '^idx\d+$' -or -not (Test-Path -LiteralPath $sd -PathType Container)) { continue }
+        if (@(Get-ChildItem -LiteralPath $sd -Force).Count -eq 0) {
+            try { Remove-Item -LiteralPath $sd -Force }
+            catch { Write-WinMediaLog -Config $Config -Level Warning -Message "無法移除空的暫存目錄：$sd（$($_.Exception.Message)）" }
+        }
+        else { Write-WinMediaLog -Config $Config -Level Warning -Message "平行掛載的暫存目錄非空，保留：$sd" }
+    }
+}

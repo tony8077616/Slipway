@@ -55,7 +55,8 @@ Describe 'Copy-WinMediaUpdatedBootFiles（選項 B：_EX 開機檔）' -Tag 'Uni
 
 Describe '選項 UpdateBootFiles 的讀取保護（StrictMode 下缺鍵會拋錯）' -Tag 'Unit' {
     It '主檔中每一處 $Config.UpdateBootFiles 都以 ContainsKey 保護' {
-        $text = Get-Content -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\Public\Invoke-WindowsMediaRefresh.ps1') -Raw -Encoding UTF8
+        # install 索引步驟已抽出至 Invoke-WinMediaInstallIndexUpdate.ps1，兩個檔案都要計入
+        $text = (Get-Content -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\Public\Invoke-WindowsMediaRefresh.ps1') -Raw -Encoding UTF8) + (Get-Content -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\Public\Invoke-WinMediaInstallIndexUpdate.ps1') -Raw -Encoding UTF8)
         $all = ([regex]::Matches($text, '\$Config\.UpdateBootFiles')).Count
         $guarded = ([regex]::Matches($text, "-not \`$Config\.ContainsKey\('UpdateBootFiles'\) -or \`$Config\.UpdateBootFiles")).Count
         $all | Should -BeGreaterThan 0

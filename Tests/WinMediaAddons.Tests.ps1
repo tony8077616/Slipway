@@ -169,7 +169,8 @@ Describe 'Appx 移除（§3.3、§5.8）' -Tag 'Unit' {
 
 Describe '步驟 6 順序（§5.9）' -Tag 'Unit' {
     BeforeAll {
-        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
+        # 步驟 6（install 索引）已抽出為 Invoke-WinMediaInstallIndexImageUpdate，本區段的所有指令都位於該檔案
+        $mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexImageUpdate.ps1'
         $script:ast = [System.Management.Automation.Language.Parser]::ParseFile($mainPath, [ref]$null, [ref]$null)
         $script:commands = @($script:ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true))
         $script:step6Start = ($script:commands | Where-Object { $_.GetCommandName() -eq 'Remove-WinMediaAppx' }).Extent.StartOffset

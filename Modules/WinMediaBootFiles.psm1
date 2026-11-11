@@ -355,7 +355,8 @@ function Set-WinMediaBootSoftware {
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     Invoke-WinMediaWimlib -ArgumentList @('extract', $WimPath, [string]$Index, '\Windows\System32\config\SOFTWARE', ('--dest-dir={0}' -f $dir), '--no-acls', '--no-attributes') -Config $Config | Out-Null
     $hive = Join-Path -Path $dir -ChildPath 'SOFTWARE'
-    $root = 'HKLM\WinMediaBootSW'
+    # 每次載入使用唯一的登錄根鍵名稱（與 Get-WinMediaBuildInfo 相同做法）
+    $root = 'HKLM\WinMediaBootSW_{0}' -f [guid]::NewGuid().ToString('N')
     $load = Invoke-WinMediaExternal -FilePath 'reg.exe' -ArgumentList @('load', $root, $hive) -Config $Config
     if ($load.ExitCode -ne 0) { throw "載入 SOFTWARE 失敗：$($load.StdErr)" }
     try {

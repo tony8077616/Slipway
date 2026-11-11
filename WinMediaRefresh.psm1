@@ -30,6 +30,21 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'Modules\WinMediaB
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath 'Modules\WinMediaDefender.psm1') -Force
 
 # 組合點：主流程組合上述所有模組，因此留在根模組內
+# Step 12a：install 索引更新（主流程的 install 迴圈呼叫）；與主流程同屬根模組範圍，故以 dot-source 載入
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaInstallIndexImageUpdate.ps1')
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1')
+# Step 12b-2：子程序啟動器（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Start-WinMediaIndexWorker.ps1')
+# Step 12c-1：平行處理計畫純函式（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Get-WinMediaParallelPlan.ps1')
+# Step 12c-2a：平行逾時清理函式（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaParallelCleanup.ps1')
+# Step 12c-2b：平行排程（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaParallelRun.ps1')
+# Step 12c-3a：平行匯出與合併（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaParallelMerge.ps1')
+# Step 12c-3b：平行安裝索引的編排（不匯出）
+. (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WinMediaParallelInstall.ps1')
 . (Join-Path -Path $PSScriptRoot -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1')
 
 Export-ModuleMember -Function @(

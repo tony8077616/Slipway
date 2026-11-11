@@ -63,10 +63,10 @@ Describe 'Setup DU 展開順序與目的地（文件第 26、27 列）' -Tag 'Un
     }
 
     It 'WinPE 同步（媒體 → 索引 2）位於 LCU 之後，避免 LCU 把檔案蓋回去' {
-        $lcuPos = $script:mainText.IndexOf('-PackagePath $lcuStage')
+        $fnText = (Get-Content -LiteralPath (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1') -Raw) + (Get-Content -LiteralPath (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexImageUpdate.ps1') -Raw); $lcuPos = $fnText.IndexOf('-PackagePath $lcuStage'); $callPos = $script:mainText.IndexOf('Invoke-WinMediaInstallIndexUpdate -mounted'); $fnText.IndexOf('Copy-WinMediaBootWimSources') | Should -Be -1
         $syncPos = $script:mainText.IndexOf('Copy-WinMediaBootWimSources -MediaDir')
         $lcuPos | Should -BeGreaterThan -1
-        $syncPos | Should -BeGreaterThan $lcuPos
+        $callPos | Should -BeGreaterThan -1; $syncPos | Should -BeGreaterThan $callPos
     }
 
     It 'Setup DU 展開到暫存目錄並以 /U 規則複製進媒體，且早於 WinPE 同步（WinPE 的 setuphost 因此取得 DU 版本）' {

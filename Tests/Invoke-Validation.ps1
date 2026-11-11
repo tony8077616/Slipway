@@ -6,6 +6,17 @@
 [CmdletBinding()]
 param()
 
+# Windows PowerShell 5.1 會沿用啟動它的 pwsh 7 的 PSModulePath，內建模組因此載入失敗；改回 5.1 的預設路徑（Pester 6.2.0 在使用者模組目錄下）
+if ($PSVersionTable.PSEdition -ne 'Core') {
+    $docs = [Environment]::GetFolderPath('MyDocuments')
+    $env:PSModulePath = @(
+        [IO.Path]::Combine($docs, 'WindowsPowerShell\Modules'),
+        [IO.Path]::Combine($env:ProgramFiles, 'WindowsPowerShell\Modules'),
+        [IO.Path]::Combine($env:SystemRoot, 'system32\WindowsPowerShell\v1.0\Modules'),
+        [IO.Path]::Combine($docs, 'PowerShell\Modules')
+    ) -join ';'
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 
 Import-Module -Name Pester -RequiredVersion 6.2.0 -ErrorAction Stop
