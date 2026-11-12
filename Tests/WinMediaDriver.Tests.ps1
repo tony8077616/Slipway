@@ -252,13 +252,20 @@ Describe 'Install-WinMediaDriver：AMD WTx64 與同名 W11x64 的注入規則' -
             Should -Invoke Add-WindowsDriver -Times 1 -Exactly -ParameterFilter { $Driver -like '*Other*WTx64*b.inf' }
         }
 
-        It '同名 W11x64 注入失敗時中止，且不注入 WTx64' {
+        It '同名 W11x64 注入失敗時警告並繼續，且不注入 WTx64' {
             Mock Add-WindowsDriver { param($Driver) if ($Driver -like '*W11x64*') { throw 'boom' } }
             Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Chipset\SFH1.1 Driver\W11x64\amdsfhkmdf\a.inf'
             Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Chipset\SFH1.1 Driver\WTx64\amdsfhkmdf\a.inf'
-            { Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $script:set -ForceUnsigned $false -Config $script:cfg } |
-                Should -Throw '*驅動注入失敗*W11x64*'
+            { Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $script:set -ForceUnsigned $false -Config $script:cfg } | Should -Not -Throw
             Should -Invoke Add-WindowsDriver -Times 0 -Exactly -ParameterFilter { $Driver -like '*WTx64*' }
+            Should -Invoke Write-WinMediaLog -Times 2 -Exactly -ParameterFilter { $Level -eq 'Warning' -and $Message -like '*W11x64*' }
+        }
+
+        It '無同名 WTx64 的 W11x64 注入失敗時仍中止' {
+            Mock Add-WindowsDriver { param($Driver) if ($Driver -like '*W11x64*') { throw 'boom' } }
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\PMF_X\W11x64\x.inf'
+            { Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $script:set -ForceUnsigned $false -Config $script:cfg } |
+                Should -Throw '*驅動注入失敗*PMF_X*'
         }
 
         It '無同名 W11x64 的 WTx64 注入失敗時警告並繼續' {

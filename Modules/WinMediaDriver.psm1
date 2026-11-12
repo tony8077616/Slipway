@@ -72,7 +72,14 @@ function Install-WinMediaDriver {
             $rel = $inf.FullName.Substring($statePath.Length).TrimStart('\')
             if ($rel -match '(^|\\)WTx64\\') { $deferred += $rel; continue }
             try { Invoke-WinMediaDriverInf -MountPath $MountPath -InfPath $inf.FullName -ForceUnsigned $ForceUnsigned -Config $Config }
-            catch { throw "驅動注入失敗：$rel（$($_.Exception.Message)）" }
+            catch {
+                $pairedWt = $rel -replace '(^|\\)W11x64\\', '${1}WTx64\'
+                if ($pairedWt -ne $rel -and (Test-Path -LiteralPath (Join-Path -Path $statePath -ChildPath $pairedWt))) {
+                    Write-WinMediaLog -Config $Config -Level Warning -Message "W11x64 驅動注入失敗，略過同名 WTx64：$rel（$($_.Exception.Message)）"
+                    continue
+                }
+                throw "驅動注入失敗：$rel（$($_.Exception.Message)）"
+            }
             $injected[$rel.ToLowerInvariant()] = $true
         }
         # AMD WTx64 與同名 W11x64 重複：W11x64 注入成功才略過 WTx64；無 W11x64 則嘗試 WTx64；其餘不注入並警告

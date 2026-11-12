@@ -50,7 +50,7 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 - **Install-WinMediaAdk**：ADK 缺少時下載安裝程式，驗證 Microsoft 簽章後以 `/quiet /installpath` 安裝 Deployment Tools。
 - **Test-WinMediaVirtualEdition**：檢查虛擬版本條件與 EditionID。
 - **Resolve-WinMediaDriverSet**：掃描 `Drivers.Path` 的 `ALL`、`WinPE`、`OS` 子資料夾（遞迴找 `.inf`），無 `.inf` 的子資料夾略過並寫入 Warning。
-- **Install-WinMediaDriver**：依目標（WinRE、Install、Boot）對映像呼叫 `Add-WindowsDriver -Recurse`，狀態與目標的對應見 README。
+- **Install-WinMediaDriver**：依目標（WinRE、Install、Boot）對映像逐一 INF 呼叫 `Add-WindowsDriver`（不使用 `-Recurse`），失敗的 INF 會中止並帶上路徑。AMD `WTx64` 與同名 `W11x64` 重複時，W11x64 注入成功才略過 WTx64；W11x64 失敗則警告並略過 WTx64；無同名 W11x64 的 WTx64 嘗試注入，失敗只警告。狀態與目標的對應見 README。
 - **Resolve-WinMediaLxp**：遞迴找 `LanguageExperiencePack*` 套件，從 zip 讀出 `AppxManifest.xml`（或 bundle 的 `AppxMetadata/AppxBundleManifest.xml`）與 `License.xml`。
 - **Install-WinMediaLxp**：以 `Add-AppxProvisionedPackage -Regions 'all'` 加入 install.wim。
 - **Resolve-WinMediaAppxList／Remove-WinMediaAppx**：解析 CustomAppsList；`Remove` 移除清單內的 provisioned app，`Keep` 移除清單外者並保留框架與語言套件。
