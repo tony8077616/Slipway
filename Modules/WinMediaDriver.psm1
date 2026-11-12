@@ -64,11 +64,11 @@ function Install-WinMediaDriver {
 
     foreach ($state in $DriverSet.Keys) {
         if (-not $DriverSet[$state].Targets[$Target]) { continue }
-        $statePath = $DriverSet[$state].Path
+        $statePath = (Get-Item -LiteralPath $DriverSet[$state].Path).FullName.TrimEnd('\')
         Write-WinMediaLog -Config $Config -Level Verbose -Message "注入驅動：$state → $Target（掛載點 $MountPath，ForceUnsigned=$ForceUnsigned）"
         $injected = @{}
         $deferred = @()
-        foreach ($inf in @(Get-ChildItem -LiteralPath $statePath -Filter '*.inf' -File -Recurse | Sort-Object FullName)) {
+        foreach ($inf in @(Get-ChildItem -LiteralPath $statePath -Filter '*.inf' -File -Recurse | Where-Object { $_.Extension -eq '.inf' } | Sort-Object FullName)) {
             $rel = $inf.FullName.Substring($statePath.Length).TrimStart('\')
             if ($rel -match '(^|\\)WTx64\\') { $deferred += $rel; continue }
             try { Invoke-WinMediaDriverInf -MountPath $MountPath -InfPath $inf.FullName -ForceUnsigned $ForceUnsigned -Config $Config }
@@ -82,7 +82,7 @@ function Install-WinMediaDriver {
             }
             $injected[$rel.ToLowerInvariant()] = $true
         }
-        # AMD WTx64 與同名 W11x64 重複：W11x64 注入成功才略過 WTx64；無 W11x64 則嘗試 WTx64；其餘不注入並警告
+        # WTx64 與同名 W11x64 重複（以同名 INF 的相對路徑配對）：W11x64 注入成功才略過 WTx64；無 W11x64 則嘗試 WTx64；其餘不注入並警告
         foreach ($rel in $deferred) {
             $sibling = $rel -replace '(^|\\)WTx64\\', '${1}W11x64\'
             if ($injected.ContainsKey($sibling.ToLowerInvariant())) {

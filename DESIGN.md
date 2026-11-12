@@ -50,7 +50,7 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 - **Install-WinMediaAdk**：ADK 缺少時下載安裝程式，驗證 Microsoft 簽章後以 `/quiet /installpath` 安裝 Deployment Tools。
 - **Test-WinMediaVirtualEdition**：檢查虛擬版本條件與 EditionID。
 - **Resolve-WinMediaDriverSet**：掃描 `Drivers.Path` 的 `ALL`、`WinPE`、`OS` 子資料夾（遞迴找 `.inf`），無 `.inf` 的子資料夾略過並寫入 Warning。
-- **Install-WinMediaDriver**：依目標（WinRE、Install、Boot）對映像逐一 INF 呼叫 `Add-WindowsDriver`（不使用 `-Recurse`），失敗的 INF 會中止並帶上路徑。AMD `WTx64` 與同名 `W11x64` 重複時，W11x64 注入成功才略過 WTx64；W11x64 失敗則警告並略過 WTx64；無同名 W11x64 的 WTx64 嘗試注入，失敗只警告。狀態與目標的對應見 README。
+- **Install-WinMediaDriver**：依目標（WinRE、Install、Boot）對映像逐一 INF 呼叫 `Add-WindowsDriver`（不使用 `-Recurse`），失敗的 INF 會中止並帶上路徑。`WTx64` 資料夾的 INF 與同名（相同相對路徑，`WTx64` 改為 `W11x64`）的 INF 配對（不限廠商）：W11x64 注入成功才略過 WTx64；W11x64 注入失敗且存在配對時警告並兩者皆不注入；無同名 W11x64 的 WTx64 嘗試注入，失敗只警告；沒有 WTx64 配對的 W11x64 失敗則中止。狀態與目標的對應見 README。
 - **Resolve-WinMediaLxp**：遞迴找 `LanguageExperiencePack*` 套件，從 zip 讀出 `AppxManifest.xml`（或 bundle 的 `AppxMetadata/AppxBundleManifest.xml`）與 `License.xml`。
 - **Install-WinMediaLxp**：以 `Add-AppxProvisionedPackage -Regions 'all'` 加入 install.wim。
 - **Resolve-WinMediaAppxList／Remove-WinMediaAppx**：解析 CustomAppsList；`Remove` 移除清單內的 provisioned app，`Keep` 移除清單外者並保留框架與語言套件。
@@ -109,6 +109,7 @@ Invoke-WindowsMediaRefresh (主流程，Public)
 | 2026-10-26 | 審查第 20 則：`Install-WinMediaStoreApp` 注入前重新計算每個檔案的 SHA-256，與 Resolve 時記錄的值比對；不符、缺少記錄或檔案已不存在即拒絕（fail-closed）。 | 稽核清單第 20 則 | 單元測試 `WinMediaStoreApps.Tests.ps1`（拒絕注入的五條測試附 ExpectedMessage）；Slipway PR #20 |
 | 2026-10-26 | 審查第 9 則：`Save-WinMediaUpdateFile` 在 SHA-1 通過後，再以 `Test-WinMediaMicrosoftSignature` 要求 Authenticode 狀態為 Valid 且簽署者為 O=Microsoft Corporation；套用於所有下載（包含 Catalog）。下載後驗簽失敗即刪檔並中止；快取命中後驗簽失敗只拋錯、不刪檔。 | 稽核清單第 9 則 | 單元測試 `WinMediaUpdate.Tests.ps1`；Slipway PR #21。已知限制：擋不住降級攻擊（另一份仍由 Microsoft 簽署的舊版會通過）。 |
 | 2026-10-26 | 審查第 8＋15 則：(8) WorkDir 根目錄只接手本工具建立、為空、或有可信標記的目錄，才套用「關閉繼承，只有 SYSTEM 與 Administrators」的 ACL；磁碟根目錄、非空且未登記的目錄、擁有者不合格或含 reparse point 的目錄一律拒絕。非 NTFS／ReFS 卷只發出警告、不套 ACL；使用者選擇維持只警告，未改為預設拒絕。(15) Defender 排除在加入前先寫狀態檔，下次啟動只移除同時列在狀態檔、又等於本次 WorkDir、MountDir、OutputDir 的排除。狀態檔由 Slipway PR #24 改放 `%LOCALAPPDATA%\WinMediaRefresh\defender-state\<鍵>.json`，每個 WorkDir 一份，不再放在 WorkDir 根目錄（WorkDir 在 RAMDisk 上時重開機會消失）。 | 稽核清單第 8、15 則 | 單元測試 `WinMediaWorkDir.Tests.ps1`、`WinMediaDefender.Tests.ps1`；三次獨立審查，每次的 HIGH 均已修正；Slipway PR #23、#24。冒煙測試尚未做（建議以系統管理員身分在拋棄式 NTFS 目錄連續執行兩次 `Initialize-WinMediaWorkRoot`）。 |
+| 2026-11-12 | AMD `WTx64` 與同名 `W11x64` 的注入規則（使用者指定）：驅動改為逐一 INF 呼叫 `Add-WindowsDriver`（不用 `-Recurse`）；W11x64 注入成功才略過 WTx64；W11x64 失敗且有配對時警告並兩者皆不注入；無配對的 WTx64 嘗試注入，失敗只警告；沒有 WTx64 配對的 W11x64 失敗中止。修正：`Drivers.Path` 為相對路徑時 `$rel` 的計算錯誤，改以 `Get-Item` 正規化路徑。 | 使用者以 AskUserQuestion 回答驅動處理方式；逐檔注入才能判斷每個 INF 的結果 | 單元測試 `WinMediaDriver.Tests.ps1`：41/0（pwsh 7 與 Windows PowerShell 5.1）；相對路徑回歸測試在修正前為紅（0 次注入）、修正後為綠；PSSA Error／Warning 0。實機 VM 驗證未做 |
 
 ### 技術選型
 

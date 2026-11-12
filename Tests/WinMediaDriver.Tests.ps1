@@ -252,6 +252,15 @@ Describe 'Install-WinMediaDriver：AMD WTx64 與同名 W11x64 的注入規則' -
             Should -Invoke Add-WindowsDriver -Times 1 -Exactly -ParameterFilter { $Driver -like '*Other*WTx64*b.inf' }
         }
 
+        It '相對路徑的驅動資料夾仍以絕對路徑注入 WTx64' {
+            Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Other\WTx64\b.inf'
+            $relSet = @{ OS = [pscustomobject]@{ Path = '.\OS'; Targets = @{ WinRE = $false; Install = $true; Boot = $false } } }
+            Push-Location -LiteralPath (Split-Path -Parent $script:os)
+            try { Install-WinMediaDriver -MountPath 'M:\m' -Target 'Install' -DriverSet $relSet -ForceUnsigned $false -Config $script:cfg }
+            finally { Pop-Location }
+            Should -Invoke Add-WindowsDriver -Times 1 -Exactly -ParameterFilter { $Driver -like '*Other*WTx64*b.inf' -and [IO.Path]::IsPathRooted($Driver) }
+        }
+
         It '同名 W11x64 注入失敗時警告並繼續，且不注入 WTx64' {
             Mock Add-WindowsDriver { param($Driver) if ($Driver -like '*W11x64*') { throw 'boom' } }
             Add-AmdFixtureInf -OsRoot $script:os -Rel 'AMD\Chipset\SFH1.1 Driver\W11x64\amdsfhkmdf\a.inf'
