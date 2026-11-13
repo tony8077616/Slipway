@@ -117,6 +117,36 @@ Describe 'Get-WinMediaPackageCategoryByContent（WIM 格式 .msu）' -Tag 'Unit'
     }
 }
 
+Describe 'Get-WinMediaPackageVersion（Rollup／SSU 的 identity 版本）' -Tag 'Unit' {
+    BeforeEach {
+        $script:verRoot = Join-Path -Path $TestDrive -ChildPath ('ver-' + [guid]::NewGuid().ToString('N'))
+        $script:verExpand = Join-Path -Path $script:verRoot -ChildPath 'expand'
+        [IO.Directory]::CreateDirectory($script:verExpand) | Out-Null
+    }
+
+    It 'CombinedCU 內的 SSU：從 nested-<cab> 目錄的 update.mum 讀出 Package_for_ServicingStack 版本' {
+        $msuDir = Join-Path -Path $script:verExpand -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        $nested = Join-Path -Path $msuDir -ChildPath 'nested-SSU-26100.9815-x64.cab'
+        [IO.Directory]::CreateDirectory($nested) | Out-Null
+        [IO.File]::WriteAllText((Join-Path -Path $nested -ChildPath 'update.mum'), '<assembly><assemblyIdentity name="Package_for_ServicingStack_9815" version="26100.9815.1.3" processorArchitecture="amd64" /></assembly>')
+        $pkg = Join-Path -Path $msuDir -ChildPath 'SSU-26100.9815-x64.cab'
+        Get-WinMediaPackageVersion -Package $pkg -ExpandDir $script:verExpand -Kind 'ServicingStack' | Should -Be ([version]'26100.9815.1.3')
+    }
+
+    It 'LCU msu：從 ExpandDir 下同名目錄的 update.mum 讀出 Package_for_RollupFix 版本' {
+        $msu = Join-Path -Path $script:verRoot -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        $leafDir = Join-Path -Path $script:verExpand -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        [IO.Directory]::CreateDirectory($leafDir) | Out-Null
+        [IO.File]::WriteAllText((Join-Path -Path $leafDir -ChildPath 'update.mum'), '<assembly><assemblyIdentity name="Package_for_RollupFix" version="26100.9818.1.42" processorArchitecture="amd64" /></assembly>')
+        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' | Should -Be ([version]'26100.9818.1.42')
+    }
+
+    It '找不到對應 identity 時回傳 $null' {
+        $msu = Join-Path -Path $script:verRoot -ChildPath 'Windows11.0-KB1111111-x64.msu'
+        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Get-WinMediaMumXVersion（LCU msu 內的 MumX 容器版本）' -Tag 'Unit' {
     It '有 MUMX 檔頭且 byte[215] 為 ''1'' 時為 v1' {
         $path = Join-Path -Path $TestDrive -ChildPath 'mumx-v1.mumx.esd'

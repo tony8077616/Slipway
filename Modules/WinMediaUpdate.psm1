@@ -376,7 +376,9 @@ function Resolve-WinMediaCumulativeSet {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Paths,
-        [Parameter(Mandatory)][hashtable]$Config
+        [Parameter(Mandatory)][hashtable]$Config,
+        # 選填：路徑 → [version]（Rollup 套件的 identity 版本）；有版本時依版本排序，與 convert-UUP chklcu 一致
+        [hashtable]$Versions = @{}
     )
 
     $candidates = @($Paths | Where-Object { $_ -match '\.msu$' })
@@ -385,9 +387,10 @@ function Resolve-WinMediaCumulativeSet {
     foreach ($path in $candidates) {
         $kb = Get-WinMediaKbOfName -Name (Split-Path -Path $path -Leaf)
         if ($null -eq $kb -and $candidates.Count -gt 1) { throw "多個累積更新但檔名缺少 KB 編號，無法判定 checkpoint：$(Split-Path -Path $path -Leaf)" }
-        $ranked += [pscustomobject]@{ Path = $path; Kb = $kb }
+        $ver = if ($Versions.ContainsKey($path) -and $Versions[$path]) { [version]$Versions[$path] } else { [version]'0.0.0.0' }
+        $ranked += [pscustomobject]@{ Path = $path; Kb = $kb; Ver = $ver }
     }
-    $ordered = @($ranked | Sort-Object -Property Kb -Descending)
+    $ordered = @($ranked | Sort-Object -Property @{ Expression = { $_.Ver } }, @{ Expression = { $_.Kb } } -Descending)
     $target = $ordered[0].Path
     $checkpoints = @($ordered | Select-Object -Skip 1 | ForEach-Object { $_.Path } | Sort-Object)
     foreach ($cp in $checkpoints) { Write-WinMediaLog -Config $Config -Level Info -Message "前置 checkpoint：$(Split-Path -Path $cp -Leaf)" }

@@ -326,7 +326,18 @@
     $candidates = if ($downloaded.Count -gt 0) { $downloaded } else { @($categories.LCU) + @($categories.Checkpoint) }
     if (@($candidates).Count -eq 0) { throw '缺少最新 LCU。' }
     # Build 路徑直接採用 Save-WinMediaBuildSet 的判定結果；手動路徑才對候補清單重新判定
-    $cumulative = if ($buildSet) { [pscustomobject]@{ Target = $buildSet.Target; Checkpoints = @($buildSet.Checkpoints) } } else { Resolve-WinMediaCumulativeSet -Paths @($candidates) -Config $Config }
+    $cumulative = if ($buildSet) {
+        [pscustomobject]@{ Target = $buildSet.Target; Checkpoints = @($buildSet.Checkpoints) }
+    }
+    else {
+        # 手動路徑依 identity 版本排序（convert-UUP :chklcu）；讀不到版本的候選退回 KB 編號排序
+        $lcuVersions = @{}
+        foreach ($path in @($candidates)) {
+            $version = Get-WinMediaPackageVersion -Package $path -ExpandDir $expandDir -Kind RollupFix
+            if ($version) { $lcuVersions[$path] = $version }
+        }
+        Resolve-WinMediaCumulativeSet -Paths @($candidates) -Config $Config -Versions $lcuVersions
+    }
     if (-not $cumulative) { throw '缺少最新 LCU（PackageDir 內沒有 .msu 累積更新）。' }
     if ($downloaded.Count -eq 0 -and @($cumulative.Checkpoints).Count -gt 0) {
         Write-WinMediaLog -Config $Config -Level Warning -Message ('PackageDir 內有較舊的累積更新，將視為前置 checkpoint：' + (($cumulative.Checkpoints | ForEach-Object { Split-Path -Path $_ -Leaf }) -join ', ') + '。建議只保留目標與其 checkpoint。')
@@ -343,11 +354,26 @@
     # SSU 取自目標 CU 的展開目錄（CombinedCU 內的 SSU-*.cab）；checkpoint 內的 SSU 較舊，不可用於 WinRE 與主映像
     $targetName = Split-Path -Path $cumulative.Target -Leaf
     $escapedTarget = [System.Management.Automation.WildcardPattern]::Escape($targetName)
-    $ssu = @($categories.SSU | Where-Object { $_ -like "*\$escapedTarget\*" }) | Select-Object -First 1
-    if (-not $ssu) {
-        if ($buildSet) { throw '目標累積更新內找不到 SSU（Build 路徑不回退至 PackageDir 內的舊 SSU）。' }
-        $ssu = $categories.SSU | Select-Object -First 1
-        Write-WinMediaLog -Config $Config -Level Warning -Message '目標累積更新內找不到 SSU，改用 PackageDir 內第一個 SSU。'
+    $targetSsu = @($categories.SSU | Where-Object { $_ -like "*\$escapedTarget\*" })
+    if ($buildSet) {
+        if ($targetSsu.Count -eq 0) { throw '目標累積更新內找不到 SSU（Build 路徑不回退至 PackageDir 內的舊 SSU）。' }
+        $ssu = $targetSsu | Select-Object -First 1
+    }
+    else {
+        # 手動路徑：所有 SSU 候選比對 identity 版本，保留最新（convert-UUP :chkssu）；讀不到版本視為 0.0.0.0
+        $ssu = $null
+        $ssuBest = [version]'0.0.0.0'
+        foreach ($path in @($categories.SSU)) {
+            $version = Get-WinMediaPackageVersion -Package $path -ExpandDir $expandDir -Kind ServicingStack
+            if (-not $version) { $version = [version]'0.0.0.0' }
+            if ($null -eq $ssu -or $version -gt $ssuBest) { $ssu = $path; $ssuBest = $version }
+        }
+        if (@($categories.SSU).Count -gt 1) {
+            Write-WinMediaLog -Config $Config -Level Info -Message "SSU 依版本保留最新：$(Split-Path -Path $ssu -Leaf)（版本 $ssuBest）。"
+        }
+        if ($targetSsu.Count -eq 0) {
+            Write-WinMediaLog -Config $Config -Level Warning -Message '目標累積更新內找不到 SSU，改用 PackageDir 內版本最新的 SSU。'
+        }
     }
     $lcuStage = New-WinMediaUpdateStage -Target $cumulative.Target -Checkpoints @($cumulative.Checkpoints) -StageDir $stageDir -Config $Config
     $dotNet = $categories.DotNetCU | Select-Object -First 1

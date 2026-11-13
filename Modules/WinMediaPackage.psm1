@@ -136,6 +136,36 @@ function Get-WinMediaMumXVersion {
     return 1
 }
 
+function Get-WinMediaPackageVersion {
+    # 讀取 Rollup（RollupFix）或 SSU（ServicingStack）的 identity 版本，供同類候選「保留最新」比較（convert-UUP :chklcu、:chkssu）
+    # 只讀已展開的 update.mum：先找 ExpandDir\<檔名>，再找同層的 nested-<檔名>；找不到回傳 $null
+    [CmdletBinding()]
+    [OutputType([version])]
+    param(
+        [Parameter(Mandatory)][string]$Package,
+        [Parameter(Mandatory)][string]$ExpandDir,
+        [Parameter(Mandatory)][ValidateSet('RollupFix', 'ServicingStack')][string]$Kind
+    )
+
+    $leaf = [System.IO.Path]::GetFileName($Package)
+    $roots = @(
+        (Join-Path -Path $ExpandDir -ChildPath $leaf),
+        (Join-Path -Path (Split-Path -Path $Package -Parent) -ChildPath ('nested-' + $leaf))
+    )
+    $namePattern = if ($Kind -eq 'RollupFix') { '^Package_for_RollupFix$' } else { '^Package_for_ServicingStack_\d+$' }
+    foreach ($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        foreach ($mum in @(Get-ChildItem -LiteralPath $root -Filter 'update.mum' -Recurse -File)) {
+            $text = Get-Content -LiteralPath $mum.FullName -Raw
+            $tag = [regex]::Match($text, '<assemblyIdentity\b[^>]*>').Value
+            $name = [regex]::Match($tag, '\sname="([^"]+)"').Groups[1].Value
+            $version = [regex]::Match($tag, '\sversion="([^"]+)"').Groups[1].Value
+            if ($name -match $namePattern -and $version) { return [version]$version }
+        }
+    }
+    return $null
+}
+
 function Test-WinMediaWimFile {
     # 讀取檔頭 8 位元組判斷是否為 WIM（MSWIM\0\0\0）；只讀前 8 位元組，避免 4.5 GB 的檔案被整包載入
     [CmdletBinding()]
@@ -249,4 +279,4 @@ function Get-WinMediaPackageCategoryByContent {
     return 'Unknown'
 }
 
-Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent, Get-WinMediaMumXVersion
+Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent, Get-WinMediaMumXVersion, Get-WinMediaPackageVersion
