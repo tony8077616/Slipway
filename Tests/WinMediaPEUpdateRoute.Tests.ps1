@@ -53,6 +53,12 @@ Describe 'WinPEUpdate 路線選項（Lcu 為預設；SafeOS 為 WinRE 路線的 
         $source | Should -Match "ContainsKey\('WinPEUpdate'\)\) \{ \`$Config\.WinPEUpdate = 'Lcu' \}"
     }
 
+    It 'Lcu 且未偵測到目標 checkpoint 時於步驟 4 寫入警告（不中止）' {
+        $source = Get-Content -LiteralPath $script:pipelineFile -Raw
+        $source | Should -Match "WinPEUpdate -eq 'Lcu' -and @\(\`$cumulative\.Checkpoints\)\.Count -eq 0"
+        $source | Should -Match '未偵測到目標 LCU 的 checkpoint'
+    }
+
     It '驗證拒絕未知的 WinPEUpdate 值' {
         $source = Get-Content -LiteralPath $script:pipelineFile -Raw
         $source | Should -Match "WinPEUpdate -notin 'SafeOS', 'Lcu'"

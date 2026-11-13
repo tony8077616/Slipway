@@ -331,6 +331,9 @@
     if ($downloaded.Count -eq 0 -and @($cumulative.Checkpoints).Count -gt 0) {
         Write-WinMediaLog -Config $Config -Level Warning -Message ('PackageDir 內有較舊的累積更新，將視為前置 checkpoint：' + (($cumulative.Checkpoints | ForEach-Object { Split-Path -Path $_ -Leaf }) -join ', ') + '。建議只保留目標與其 checkpoint。')
     }
+    if ($Config.WinPEUpdate -eq 'Lcu' -and @($cumulative.Checkpoints).Count -eq 0) {
+        Write-WinMediaLog -Config $Config -Level Warning -Message '未偵測到目標 LCU 的 checkpoint；boot 步驟的 LCU 可能無效，並會在 install 索引全部完成後才中止（若 Download.KB 下載時此警告為誤報，可忽略）。'
+    }
     if ($categories.Unclassified.Count -gt 0) {
         Write-WinMediaLog -Config $Config -Level Warning -Message ('無法分類、略過的套件：' + (($categories.Unclassified | ForEach-Object { Split-Path -Path $_ -Leaf }) -join ', '))
     }
@@ -459,7 +462,7 @@
     $bootWimList = Join-Path -Path $PSScriptRoot -ChildPath '..\Config\bootwim.txt'
     $bootMuiList = Join-Path -Path $PSScriptRoot -ChildPath '..\Config\bootmui.txt'
 
-    # 步驟 8.5：boot.wim 以已套用 SSU／SafeOS DU 的 WinRE 重建（convert-UUP 在 temp\winre.wim 更新後才複製為 boot.wim）；WinPE 核心版本由 SafeOS DU 決定，未更新的副本會停在 9444
+    # 步驟 8.5：boot.wim 以已套用 SSU／SafeOS DU 的 WinRE 重建（convert-UUP 在 temp\winre.wim 更新後才複製為 boot.wim）；SafeOS 路線的 WinPE 核心由 SafeOS DU 決定；Lcu 路線以它為起點，再由步驟 9 的 LCU 決定；未更新的副本會停在 9444
     $archName = if ($architecture -in 'amd64', 'x64') { 'x64' } else { $architecture }
     New-WinMediaBootWimFromWinRE -WinreWim $winreWim -BootWim $bootWim -MediaDir $mediaDir -ArchName $archName -Config $Config
 
