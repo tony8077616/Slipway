@@ -103,7 +103,7 @@
 | `AdkRoot` | ADK 預設安裝路徑 | `DismProvider = 'ADK'` 或需要 oscdimg 時使用；缺少時自動安裝 Deployment Tools |
 | `DismProvider` | `Inbox` | `Inbox` 或 `ADK` |
 | `OutputFormat` | `WIM` | `WIM` 或 `ESD` |
-| `WinPEUpdate` | `Lcu` | WinPE 核心更新路線（預設）：`Lcu`＝WinRE 套 SSU＋SafeOS DU，boot.wim 以目標 MSU 檔案路徑直接加入最新 LCU。**需求**：`PackageDir` 必須與目標 LCU 的 checkpoint 位於同一資料夾；缺少 checkpoint 時 Add 可能靜默失敗（實測 `full2\packages` 只放目標 MSU 時，PE 仍為 9817）。加入後 ntoskrnl 未變且未達安裝映像版本時中止。步驟 4 若未偵測到目標 LCU 的 checkpoint 會先寫入警告（`Download.KB` 下載時此警告為誤報）。`SafeOS`＝只套用 SafeOS DU（舊預設；boot.wim 核心停在 SafeOS DU 的版本，full3 實測為 9817，可能低於安裝映像）。實測：以 UUP 原資料夾（含 KB5043080 checkpoint）建置，boot 索引 1、2 為 UBR 0x265a、ntoskrnl 9818（full4，2026-11-13） |
+| `WinPEUpdate` | `Lcu` | WinPE 核心更新路線（預設）：`Lcu`＝WinRE 套 SSU＋SafeOS DU，boot.wim 以目標 MSU 檔案路徑直接加入最新 LCU。**需求**：`PackageDir` 必須與目標 LCU 的 checkpoint 位於同一資料夾；缺少 checkpoint 時 Add 可能靜默失敗（實測 `full2\packages` 只放目標 MSU 時，PE 仍為 9817）。加入後 ntoskrnl 未變且未達安裝映像版本時中止。步驟 4 若未偵測到目標 LCU 的 checkpoint 會先寫入警告（使用 `Download.KB` 時也會出現，請確認目標 MSU 所在資料夾已有 checkpoint）。`SafeOS`＝只套用 SafeOS DU（舊預設；boot.wim 核心停在 SafeOS DU 的版本，full3 實測為 9817，可能低於安裝映像）。實測：以 UUP 原資料夾（含 KB5043080 checkpoint）建置，boot 索引 1、2 為 UBR 0x265a、ntoskrnl 9818（full4，2026-11-13） |
 | `UpdateBootFiles` | `$true` | 選項 B：改用安裝映像內已套用 LCU 的 `_EX` 開機檔（bootx64、bootmgr、efisys、memtest、boot.stl、fonts、cipolicies）。**風險**：這些是 UEFI CA 2023 開機檔，韌體 db 沒有 2023 CA 的機器開啟 Secure Boot 可能無法開機 |
 | `ResetBase` | `$false` | 只作用於 WinRE 的 cleanup；啟用後無法解除安裝更新 |
 | `ResetBaseOS` | `$false` | 作用於 install.wim 各目標索引的 cleanup（`-ResetBase`）；啟用後無法解除安裝更新。必須是布林，字串（例如 `'false'`）會中止。boot.wim 不受影響 |

@@ -332,7 +332,7 @@
         Write-WinMediaLog -Config $Config -Level Warning -Message ('PackageDir 內有較舊的累積更新，將視為前置 checkpoint：' + (($cumulative.Checkpoints | ForEach-Object { Split-Path -Path $_ -Leaf }) -join ', ') + '。建議只保留目標與其 checkpoint。')
     }
     if ($Config.WinPEUpdate -eq 'Lcu' -and @($cumulative.Checkpoints).Count -eq 0) {
-        Write-WinMediaLog -Config $Config -Level Warning -Message '未偵測到目標 LCU 的 checkpoint；boot 步驟的 LCU 可能無效，並會在 install 索引全部完成後才中止（若 Download.KB 下載時此警告為誤報，可忽略）。'
+        Write-WinMediaLog -Config $Config -Level Warning -Message '未偵測到目標 LCU 的 checkpoint；boot 步驟的 LCU 可能無效，並會在 install 索引全部完成後才中止；使用 Download.KB 時也會出現，請確認目標 MSU 所在資料夾已有 checkpoint。'
     }
     if ($categories.Unclassified.Count -gt 0) {
         Write-WinMediaLog -Config $Config -Level Warning -Message ('無法分類、略過的套件：' + (($categories.Unclassified | ForEach-Object { Split-Path -Path $_ -Leaf }) -join ', '))
