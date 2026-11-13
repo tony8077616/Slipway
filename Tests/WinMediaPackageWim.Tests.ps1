@@ -130,7 +130,7 @@ Describe 'Get-WinMediaPackageVersion（Rollup／SSU 的 identity 版本）' -Tag
         [IO.Directory]::CreateDirectory($nested) | Out-Null
         [IO.File]::WriteAllText((Join-Path -Path $nested -ChildPath 'update.mum'), '<assembly><assemblyIdentity name="Package_for_ServicingStack_9815" version="26100.9815.1.3" processorArchitecture="amd64" /></assembly>')
         $pkg = Join-Path -Path $msuDir -ChildPath 'SSU-26100.9815-x64.cab'
-        Get-WinMediaPackageVersion -Package $pkg -ExpandDir $script:verExpand -Kind 'ServicingStack' | Should -Be ([version]'26100.9815.1.3')
+        Get-WinMediaPackageVersion -Package $pkg -ExpandDir $script:verExpand -Kind 'ServicingStack' -Config @{} | Should -Be ([version]'26100.9815.1.3')
     }
 
     It 'LCU msu：從 ExpandDir 下同名目錄的 update.mum 讀出 Package_for_RollupFix 版本' {
@@ -138,12 +138,44 @@ Describe 'Get-WinMediaPackageVersion（Rollup／SSU 的 identity 版本）' -Tag
         $leafDir = Join-Path -Path $script:verExpand -ChildPath 'Windows11.0-KB5127936-x64.msu'
         [IO.Directory]::CreateDirectory($leafDir) | Out-Null
         [IO.File]::WriteAllText((Join-Path -Path $leafDir -ChildPath 'update.mum'), '<assembly><assemblyIdentity name="Package_for_RollupFix" version="26100.9818.1.42" processorArchitecture="amd64" /></assembly>')
-        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' | Should -Be ([version]'26100.9818.1.42')
+        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' -Config @{} | Should -Be ([version]'26100.9818.1.42')
+    }
+
+    It 'LCU msu 的 identity 只在內層 .wim：以 wimlib 只抽出 update.mum 後讀版本' {
+        $msu = Join-Path -Path $script:verRoot -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        $leafDir = Join-Path -Path $script:verExpand -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        [IO.Directory]::CreateDirectory($leafDir) | Out-Null
+        [IO.File]::WriteAllText((Join-Path -Path $leafDir -ChildPath 'Windows11.0-KB5127936-x64.wim'), 'stub')
+        Mock -ModuleName WinMediaPackage Invoke-WinMediaWimlib {
+            $dest = ($ArgumentList | Where-Object { $_ -like '--dest-dir=*' }) -replace '^--dest-dir=', ''
+            [IO.File]::WriteAllText((Join-Path -Path $dest -ChildPath 'update.mum'), '<assembly><assemblyIdentity name="Package_for_RollupFix" version="26100.9818.1.42" processorArchitecture="amd64" /></assembly>')
+        }
+        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' -Config @{} | Should -Be ([version]'26100.9818.1.42')
+        Should -Invoke -ModuleName WinMediaPackage -CommandName Invoke-WinMediaWimlib -Times 1 -Exactly
     }
 
     It '找不到對應 identity 時回傳 $null' {
         $msu = Join-Path -Path $script:verRoot -ChildPath 'Windows11.0-KB1111111-x64.msu'
-        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' | Should -BeNullOrEmpty
+        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' -Config @{} | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Select-WinMediaNewestPackage（同類候選保留最新）' -Tag 'Unit' {
+    It '版本較高的非目標候選勝過目標候選' {
+        $paths = @('C:\pkg\target.msu', 'C:\pkg\other.msu')
+        $versions = @{ 'C:\pkg\target.msu' = [version]'26100.9000.1.1'; 'C:\pkg\other.msu' = [version]'26100.9815.1.3' }
+        Select-WinMediaNewestPackage -Paths $paths -Versions $versions | Should -Be 'C:\pkg\other.msu'
+    }
+
+    It '版本相同時採用排序靠前的目標候選' {
+        $paths = @('C:\pkg\target.msu', 'C:\pkg\other.msu')
+        $versions = @{ 'C:\pkg\target.msu' = [version]'26100.9815.1.3'; 'C:\pkg\other.msu' = [version]'26100.9815.1.3' }
+        Select-WinMediaNewestPackage -Paths $paths -Versions $versions | Should -Be 'C:\pkg\target.msu'
+    }
+
+    It '全部讀不到版本時採用排序第一者' {
+        $paths = @('C:\pkg\target.msu', 'C:\pkg\other.msu')
+        Select-WinMediaNewestPackage -Paths $paths -Versions @{} | Should -Be 'C:\pkg\target.msu'
     }
 }
 

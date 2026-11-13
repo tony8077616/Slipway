@@ -138,32 +138,79 @@ function Get-WinMediaMumXVersion {
 
 function Get-WinMediaPackageVersion {
     # 讀取 Rollup（RollupFix）或 SSU（ServicingStack）的 identity 版本，供同類候選「保留最新」比較（convert-UUP :chklcu、:chkssu）
-    # 只讀已展開的 update.mum：先找 ExpandDir\<檔名>，再找同層的 nested-<檔名>；找不到回傳 $null
+    # 先讀已展開的 update.mum（ExpandDir\<檔名>、同層 nested-<檔名>）；找不到時，LCU msu 的 identity 在內層 .wim 裡（實機 KB5127936），
+    # 才用 wimlib 只抽出 update.mum 到 ExpandDir\_version\<檔名>\。都讀不到回傳 $null
     [CmdletBinding()]
     [OutputType([version])]
     param(
         [Parameter(Mandatory)][string]$Package,
         [Parameter(Mandatory)][string]$ExpandDir,
-        [Parameter(Mandatory)][ValidateSet('RollupFix', 'ServicingStack')][string]$Kind
+        [Parameter(Mandatory)][ValidateSet('RollupFix', 'ServicingStack')][string]$Kind,
+        [Parameter(Mandatory)][hashtable]$Config
     )
 
     $leaf = [System.IO.Path]::GetFileName($Package)
-    $roots = @(
-        (Join-Path -Path $ExpandDir -ChildPath $leaf),
-        (Join-Path -Path (Split-Path -Path $Package -Parent) -ChildPath ('nested-' + $leaf))
-    )
+    $parent = Split-Path -Path $Package -Parent
+    $candidateRoots = @(Join-Path -Path $ExpandDir -ChildPath $leaf)
+    if ($parent) { $candidateRoots += Join-Path -Path $parent -ChildPath ('nested-' + $leaf) }
+    $roots = @($candidateRoots | Where-Object { Test-Path -LiteralPath $_ })
     $namePattern = if ($Kind -eq 'RollupFix') { '^Package_for_RollupFix$' } else { '^Package_for_ServicingStack_\d+$' }
-    foreach ($root in $roots) {
-        if (-not (Test-Path -LiteralPath $root)) { continue }
-        foreach ($mum in @(Get-ChildItem -LiteralPath $root -Filter 'update.mum' -Recurse -File)) {
-            $text = Get-Content -LiteralPath $mum.FullName -Raw
-            $tag = [regex]::Match($text, '<assemblyIdentity\b[^>]*>').Value
-            $name = [regex]::Match($tag, '\sname="([^"]+)"').Groups[1].Value
-            $version = [regex]::Match($tag, '\sversion="([^"]+)"').Groups[1].Value
-            if ($name -match $namePattern -and $version) { return [version]$version }
+
+    $version = Read-WinMediaIdentityVersion -MumPath @($roots | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter 'update.mum' -Recurse -File } | ForEach-Object { $_.FullName }) -NamePattern $namePattern
+    if ($version) { return $version }
+
+    $dest = Join-Path -Path $ExpandDir -ChildPath (Join-Path -Path '_version' -ChildPath $leaf)
+    foreach ($wim in @($roots | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter '*.wim' -Recurse -File } | ForEach-Object { $_.FullName })) {
+        if (-not (Test-Path -LiteralPath (Join-Path -Path $dest -ChildPath 'update.mum'))) {
+            New-Item -ItemType Directory -Path $dest -Force | Out-Null
+            try {
+                $null = Invoke-WinMediaWimlib -ArgumentList @('extract', $wim, '1', 'update.mum', "--dest-dir=$dest", '--no-acls', '--no-attributes') -Config $Config
+            }
+            catch {
+                continue
+            }
         }
+        $version = Read-WinMediaIdentityVersion -MumPath @(Join-Path -Path $dest -ChildPath 'update.mum') -NamePattern $namePattern
+        if ($version) { return $version }
     }
     return $null
+}
+
+function Read-WinMediaIdentityVersion {
+    # 從 update.mum 的 <assemblyIdentity> 標籤讀出符合 NamePattern 的版本；屬性順序與 xmlns 不影響結果
+    [CmdletBinding()]
+    [OutputType([version])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$MumPath,
+        [Parameter(Mandatory)][string]$NamePattern
+    )
+
+    foreach ($mum in $MumPath) {
+        $text = Get-Content -LiteralPath $mum -Raw
+        $tag = [regex]::Match($text, '<assemblyIdentity\b[^>]*>').Value
+        $name = [regex]::Match($tag, '\sname="([^"]+)"').Groups[1].Value
+        $found = [regex]::Match($tag, '\sversion="([^"]+)"').Groups[1].Value
+        if ($name -match $namePattern -and $found) { return [version]$found }
+    }
+    return $null
+}
+
+function Select-WinMediaNewestPackage {
+    # 依版本選出最新者；版本相同時取排序靠前者（呼叫端把目標 CU 的候選排在前面）；讀不到版本視為 0.0.0.0
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Paths,
+        [Parameter(Mandatory)][hashtable]$Versions
+    )
+
+    $best = $null
+    $bestVersion = [version]'0.0.0.0'
+    foreach ($path in $Paths) {
+        $version = if ($Versions.ContainsKey($path) -and $Versions[$path]) { [version]$Versions[$path] } else { [version]'0.0.0.0' }
+        if ($null -eq $best -or $version -gt $bestVersion) { $best = $path; $bestVersion = $version }
+    }
+    return $best
 }
 
 function Test-WinMediaWimFile {
@@ -279,4 +326,4 @@ function Get-WinMediaPackageCategoryByContent {
     return 'Unknown'
 }
 
-Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent, Get-WinMediaMumXVersion, Get-WinMediaPackageVersion
+Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent, Get-WinMediaMumXVersion, Get-WinMediaPackageVersion, Select-WinMediaNewestPackage

@@ -332,9 +332,9 @@
     else {
         # 手動路徑依 identity 版本排序（convert-UUP :chklcu）；讀不到版本的候選退回 KB 編號排序
         $lcuVersions = @{}
-        foreach ($path in @($candidates)) {
-            $version = Get-WinMediaPackageVersion -Package $path -ExpandDir $expandDir -Kind RollupFix
-            if ($version) { $lcuVersions[$path] = $version }
+        foreach ($lcuPath in @($candidates)) {
+            $lcuVer = Get-WinMediaPackageVersion -Package $lcuPath -ExpandDir $expandDir -Kind RollupFix -Config $Config
+            if ($lcuVer) { $lcuVersions[$lcuPath] = $lcuVer }
         }
         Resolve-WinMediaCumulativeSet -Paths @($candidates) -Config $Config -Versions $lcuVersions
     }
@@ -361,15 +361,16 @@
     }
     else {
         # 手動路徑：所有 SSU 候選比對 identity 版本，保留最新（convert-UUP :chkssu）；讀不到版本視為 0.0.0.0
-        $ssu = $null
-        $ssuBest = [version]'0.0.0.0'
-        foreach ($path in @($categories.SSU)) {
-            $version = Get-WinMediaPackageVersion -Package $path -ExpandDir $expandDir -Kind ServicingStack
-            if (-not $version) { $version = [version]'0.0.0.0' }
-            if ($null -eq $ssu -or $version -gt $ssuBest) { $ssu = $path; $ssuBest = $version }
+        $ssuVersions = @{}
+        foreach ($ssuPath in @($categories.SSU)) {
+            $ssuVer = Get-WinMediaPackageVersion -Package $ssuPath -ExpandDir $expandDir -Kind ServicingStack -Config $Config
+            if ($ssuVer) { $ssuVersions[$ssuPath] = $ssuVer }
         }
+        # 目標 CU 內的 SSU 排在前面，版本相同時優先採用目標 CU 的 SSU
+        $ssuOrder = @(@($targetSsu) + @($categories.SSU | Where-Object { $targetSsu -notcontains $_ }))
+        $ssu = Select-WinMediaNewestPackage -Paths $ssuOrder -Versions $ssuVersions
         if (@($categories.SSU).Count -gt 1) {
-            Write-WinMediaLog -Config $Config -Level Info -Message "SSU 依版本保留最新：$(Split-Path -Path $ssu -Leaf)（版本 $ssuBest）。"
+            Write-WinMediaLog -Config $Config -Level Info -Message "SSU 依版本保留最新：$(Split-Path -Path $ssu -Leaf)（版本 $($ssuVersions[$ssu]) ，無版本資訊者以 0.0.0.0 計）。"
         }
         if ($targetSsu.Count -eq 0) {
             Write-WinMediaLog -Config $Config -Level Warning -Message '目標累積更新內找不到 SSU，改用 PackageDir 內版本最新的 SSU。'
