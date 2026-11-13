@@ -116,3 +116,69 @@ Describe 'Get-WinMediaPackageCategoryByContent（WIM 格式 .msu）' -Tag 'Unit'
         Should -Invoke -CommandName Expand-WinMediaPackageToDir -ModuleName WinMediaPackage -ParameterFilter { $Package -like '*.msu' } -Times 2 -Exactly
     }
 }
+
+Describe 'Get-WinMediaMumXVersion（LCU msu 內的 MumX 容器版本）' -Tag 'Unit' {
+    It '有 MUMX 檔頭且 byte[215] 為 ''1'' 時為 v1' {
+        $path = Join-Path -Path $TestDrive -ChildPath 'mumx-v1.mumx.esd'
+        $bytes = New-Object -TypeName byte[] -ArgumentList 216
+        $bytes[208] = 0x4D; $bytes[209] = 0x55; $bytes[210] = 0x4D; $bytes[211] = 0x58
+        $bytes[215] = 1
+        [IO.File]::WriteAllBytes($path, $bytes)
+        InModuleScope WinMediaPackage -Parameters @{ P = $path } { Get-WinMediaMumXVersion -Path $P } | Should -Be 1
+    }
+
+    It '有 MUMX 檔頭但 byte[215] 不含 ''1'' 時為 v2' {
+        $path = Join-Path -Path $TestDrive -ChildPath 'mumx-v2.mumx.esd'
+        $bytes = New-Object -TypeName byte[] -ArgumentList 216
+        $bytes[208] = 0x4D; $bytes[209] = 0x55; $bytes[210] = 0x4D; $bytes[211] = 0x58
+        $bytes[215] = 50
+        [IO.File]::WriteAllBytes($path, $bytes)
+        InModuleScope WinMediaPackage -Parameters @{ P = $path } { Get-WinMediaMumXVersion -Path $P } | Should -Be 2
+    }
+
+    It '沒有 MUMX 檔頭的 .mumx.??? 檔視為 v1（convert-UUP 2393 的 else 分支）' {
+        $path = Join-Path -Path $TestDrive -ChildPath 'nomagic.mumx.esd'
+        [IO.File]::WriteAllBytes($path, (New-Object -TypeName byte[] -ArgumentList 216))
+        InModuleScope WinMediaPackage -Parameters @{ P = $path } { Get-WinMediaMumXVersion -Path $P } | Should -Be 1
+    }
+
+    It '無後綴的 .mumx 依 byte[7] 判斷：為 1 則 v1，否則 v2（convert-UUP 2397）' {
+        $p1 = Join-Path -Path $TestDrive -ChildPath 'plain1.mumx'
+        $p2 = Join-Path -Path $TestDrive -ChildPath 'plain2.mumx'
+        $b1 = New-Object -TypeName byte[] -ArgumentList 16; $b1[7] = 1
+        $b2 = New-Object -TypeName byte[] -ArgumentList 16; $b2[7] = 0
+        [IO.File]::WriteAllBytes($p1, $b1)
+        [IO.File]::WriteAllBytes($p2, $b2)
+        InModuleScope WinMediaPackage -Parameters @{ P = $p1 } { Get-WinMediaMumXVersion -Path $P } | Should -Be 1
+        InModuleScope WinMediaPackage -Parameters @{ P = $p2 } { Get-WinMediaMumXVersion -Path $P } | Should -Be 2
+    }
+}
+
+Describe 'Get-WinMediaPackageCategoryByContent（Setup DU 的 defender 條件）' -Tag 'Unit' {
+    BeforeEach {
+        $script:setupDuRoot = Join-Path -Path $TestDrive -ChildPath ('setupdu-' + [guid]::NewGuid().ToString('N'))
+        $script:setupDuPkgDir = Join-Path -Path $script:setupDuRoot -ChildPath 'pkg'
+        $script:setupDuExpand = Join-Path -Path $script:setupDuRoot -ChildPath 'expand'
+        [IO.Directory]::CreateDirectory($script:setupDuPkgDir) | Out-Null
+        [IO.Directory]::CreateDirectory($script:setupDuExpand) | Out-Null
+        $script:setupDuMsu = Join-Path -Path $script:setupDuPkgDir -ChildPath 'Windows11.0-KB5127650-x64.msu'
+        [IO.File]::WriteAllBytes($script:setupDuMsu, $script:cabHeader)
+        $script:setupDuTarget = Join-Path -Path $script:setupDuExpand -ChildPath 'Windows11.0-KB5127650-x64.msu'
+        [IO.Directory]::CreateDirectory($script:setupDuTarget) | Out-Null
+        [IO.File]::WriteAllText((Join-Path -Path $script:setupDuTarget -ChildPath 'SetupPlatform.exe'), 'x')
+        [IO.File]::WriteAllText((Join-Path -Path $script:setupDuTarget -ChildPath 'SetupHost.exe'), 'x')
+    }
+
+    It '沒有 update.mum 且沒有 defender xml 的 SetupPlatform／SetupHost 套件判為 SetupDU' {
+        InModuleScope WinMediaPackage -Parameters @{ P = $script:setupDuMsu; E = $script:setupDuExpand; C = $script:config } {
+            Get-WinMediaPackageCategoryByContent -Package $P -ExpandDir $E -Config $C
+        } | Should -Be 'SetupDU'
+    }
+
+    It '同樣的套件若含 defender xml 則不判為 SetupDU' {
+        [IO.File]::WriteAllText((Join-Path -Path $script:setupDuTarget -ChildPath 'MpDefender.xml'), '<x/>')
+        InModuleScope WinMediaPackage -Parameters @{ P = $script:setupDuMsu; E = $script:setupDuExpand; C = $script:config } {
+            Get-WinMediaPackageCategoryByContent -Package $P -ExpandDir $E -Config $C
+        } | Should -Be 'Unknown'
+    }
+}

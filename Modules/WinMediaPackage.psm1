@@ -107,6 +107,35 @@ function Get-WinMediaPackageCategoryByName {
     }
 }
 
+function Get-WinMediaMumXVersion {
+    # LCU msu 內的 MumX 容器版本（依 convert-UUP.cmd :checkmsu 2393、2397 的位元組規則）；回傳 1 或 2
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $head = New-Object -TypeName byte[] -ArgumentList 216
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $read = $stream.Read($head, 0, $head.Length)
+    }
+    finally {
+        $stream.Dispose()
+    }
+    if ([System.IO.Path]::GetFileName($Path) -match '\.mumx$') {
+        # 無後綴的 .mumx：byte[7] 為 1 視為 v1
+        if ($read -gt 7 -and ([string]$head[7]).Contains('1')) { return 1 }
+        return 2
+    }
+    # .mumx.???（例如 .mumx.esd）：有 MUMX 檔頭時看 byte[215]；沒有檔頭視為 v1
+    if ($read -ge 216 -and $head[208] -eq 0x4D -and $head[209] -eq 0x55 -and $head[210] -eq 0x4D -and $head[211] -eq 0x58) {
+        if (([string]$head[215]).Contains('1')) { return 1 }
+        return 2
+    }
+    return 1
+}
+
 function Test-WinMediaWimFile {
     # 讀取檔頭 8 位元組判斷是否為 WIM（MSWIM\0\0\0）；只讀前 8 位元組，避免 4.5 GB 的檔案被整包載入
     [CmdletBinding()]
@@ -189,6 +218,10 @@ function Get-WinMediaPackageCategoryByContent {
     $manifests = @(Get-ChildItem -LiteralPath $target -Recurse -File | ForEach-Object { $_.Name })
     $mumText = ''
     if ($mum) { $mumText = Get-Content -LiteralPath $mum.FullName -Raw }
+    # MumX 容器只記錄版本，不改變套用行為（Slipway 一律整包交給 DISM，等同 convert-UUP 的 LCUmsuExpand=0）
+    foreach ($mumx in @(Get-ChildItem -LiteralPath $target -Recurse -File | Where-Object { $_.Name -match '\.mumx' })) {
+        Write-WinMediaLog -Config $Config -Level Info -Message "[MumX v$(Get-WinMediaMumXVersion -Path $mumx.FullName)] $($mumx.Name)"
+    }
 
     $hasSsu = [bool]($manifests | Where-Object { $_ -like 'SSU-*' })
     $hasNestedLcu = [bool]($manifests | Where-Object { $_ -match 'KB\d+.*\.cab$' })
@@ -196,7 +229,8 @@ function Get-WinMediaPackageCategoryByContent {
     # 含有巢狀 KB cab 的是累積更新（LCU），不可能是 SafeOS DU，避免完整 LCU 被誤送進 WinRE（§11.4）
     if ($hasNestedLcu) { return 'LCU' }
     # Setup DU 為扁平 cab、沒有 update.mum，以安裝程式本體辨識（實機 KB5127650 內容；convert-UUP 無此規則）
-    if (-not $mum -and $manifests -contains 'SetupPlatform.exe' -and $manifests -contains 'SetupHost.exe') { return 'SetupDU' }
+    # convert-UUP :cab2 2470–2481：沒有 update.mum 且沒有 defender xml 才視為 Setup DU
+    if (-not $mum -and -not ($manifests | Where-Object { $_ -like '*defender*.xml' }) -and $manifests -contains 'SetupPlatform.exe' -and $manifests -contains 'SetupHost.exe') { return 'SetupDU' }
 
     if ($mumText -match 'Package_for_SafeOSDU') { return 'SafeOS' }
     if ($mumText -match 'Package_for_RollupFix') {
@@ -215,4 +249,4 @@ function Get-WinMediaPackageCategoryByContent {
     return 'Unknown'
 }
 
-Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent
+Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent, Get-WinMediaMumXVersion
