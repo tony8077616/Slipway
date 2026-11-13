@@ -62,15 +62,58 @@ function Install-WinMediaDriver {
         [Parameter(Mandatory)][hashtable]$Config
     )
 
-    $common = Get-WinMediaDismCommonParameter -Config $Config
     foreach ($state in $DriverSet.Keys) {
         if (-not $DriverSet[$state].Targets[$Target]) { continue }
-        $driverPath = $DriverSet[$state].Path
+        $statePath = (Get-Item -LiteralPath $DriverSet[$state].Path).FullName.TrimEnd('\')
         Write-WinMediaLog -Config $Config -Level Verbose -Message "注入驅動：$state → $Target（掛載點 $MountPath，ForceUnsigned=$ForceUnsigned）"
-        Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-WindowsDriver -Path $MountPath -Driver $driverPath -Recurse -ForceUnsigned:$ForceUnsigned @common -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
-        } | Out-Null
+        $injected = @{}
+        $deferred = @()
+        foreach ($inf in @(Get-ChildItem -LiteralPath $statePath -Filter '*.inf' -File -Recurse | Where-Object { $_.Extension -eq '.inf' } | Sort-Object FullName)) {
+            $rel = $inf.FullName.Substring($statePath.Length).TrimStart('\')
+            if ($rel -match '(^|\\)WTx64\\') { $deferred += $rel; continue }
+            try { Invoke-WinMediaDriverInf -MountPath $MountPath -InfPath $inf.FullName -ForceUnsigned $ForceUnsigned -Config $Config }
+            catch {
+                $pairedWt = $rel -replace '(^|\\)W11x64\\', '${1}WTx64\'
+                if ($pairedWt -ne $rel -and (Test-Path -LiteralPath (Join-Path -Path $statePath -ChildPath $pairedWt))) {
+                    Write-WinMediaLog -Config $Config -Level Warning -Message "W11x64 驅動注入失敗，略過同名 WTx64：$rel（$($_.Exception.Message)）"
+                    continue
+                }
+                throw "驅動注入失敗：$rel（$($_.Exception.Message)）"
+            }
+            $injected[$rel.ToLowerInvariant()] = $true
+        }
+        # WTx64 與同名 W11x64 重複（以同名 INF 的相對路徑配對）：W11x64 注入成功才略過 WTx64；無 W11x64 則嘗試 WTx64；其餘不注入並警告
+        foreach ($rel in $deferred) {
+            $sibling = $rel -replace '(^|\\)WTx64\\', '${1}W11x64\'
+            if ($injected.ContainsKey($sibling.ToLowerInvariant())) {
+                Write-WinMediaLog -Config $Config -Level Info -Message "略過 WTx64 驅動（同名 W11x64 已注入）：$rel"
+                continue
+            }
+            if (Test-Path -LiteralPath (Join-Path -Path $statePath -ChildPath $sibling)) {
+                Write-WinMediaLog -Config $Config -Level Warning -Message "略過 WTx64 驅動（同名 W11x64 存在但未注入成功）：$rel"
+                continue
+            }
+            try { Invoke-WinMediaDriverInf -MountPath $MountPath -InfPath (Join-Path -Path $statePath -ChildPath $rel) -ForceUnsigned $ForceUnsigned -Config $Config }
+            catch { Write-WinMediaLog -Config $Config -Level Warning -Message "WTx64 驅動注入失敗，已略過：$rel（$($_.Exception.Message)）" }
+        }
     }
+}
+
+function Invoke-WinMediaDriverInf {
+    # 單一 INF 注入：每個 INF 各呼叫一次 Add-WindowsDriver，失敗時由呼叫端決定中止或警告
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$MountPath,
+        [Parameter(Mandatory)][string]$InfPath,
+        [Parameter(Mandatory)][bool]$ForceUnsigned,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    Write-WinMediaLog -Config $Config -Level Verbose -Message "注入 INF：$InfPath（掛載點 $MountPath，ForceUnsigned=$ForceUnsigned）"
+    $common = Get-WinMediaDismCommonParameter -Config $Config
+    Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
+        Add-WindowsDriver -Path $MountPath -Driver $InfPath -ForceUnsigned:$ForceUnsigned @common -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
+    } | Out-Null
 }
 
 function Resolve-WinMediaForceUnsigned {
