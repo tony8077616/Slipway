@@ -453,4 +453,21 @@ function Test-WinMediaKernelConsistency {
     throw "boot.wim 索引 $BootIndex 的 ntoskrnl 版本 $BootKernel 不符合規則（WinRE $WinreKernel，WinRE 基準 $WinreBaseKernel，安裝映像 $InstallKernel）。"
 }
 
-Export-ModuleMember -Function Test-WinMediaKernelConsistency, Copy-WinMediaUpdatedBootFiles, Compress-WinMediaBootWim, Copy-WinMediaSetupDuFiles, Copy-WinMediaBootWimSources, Get-WinMediaEffectiveLanguage, Remove-WinMediaExtraLanguage, Invoke-WinMediaBootWimAdd, Get-WinMediaBootBackground, Get-WinMediaBootSoftwareCommand, Set-WinMediaBootSoftware, New-WinMediaBootWimFromWinRE
+function Test-WinMediaLcuApplied {
+    # Lcu 路線防呆：Add 後 ntoskrnl 未變、且未達安裝映像版本，代表 LCU 未生效（同一 MSU 在無 checkpoint 的資料夾會靜默失敗）
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$BeforeKernel,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$AfterKernel,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$InstallKernel,
+        [Parameter(Mandatory)][int]$BootIndex
+    )
+    # FileVersion 原始格式含 "(WinBuild...)" 後綴，只取第一段版本號比較
+    $before = [version](($BeforeKernel -split '\s')[0])
+    $after = [version](($AfterKernel -split '\s')[0])
+    $install = [version](($InstallKernel -split '\s')[0])
+    if ($after -ne $before -or $after -ge $install) { return }
+    throw "boot.wim 索引 $BootIndex 套用 LCU 後 ntoskrnl 仍為 $AfterKernel（安裝映像 $InstallKernel），LCU 未生效。請確認 PackageDir 與目標 LCU 的 checkpoint 位於同一資料夾（見 README）。"
+}
+
+Export-ModuleMember -Function Test-WinMediaKernelConsistency, Test-WinMediaLcuApplied,Copy-WinMediaUpdatedBootFiles, Compress-WinMediaBootWim, Copy-WinMediaSetupDuFiles, Copy-WinMediaBootWimSources, Get-WinMediaEffectiveLanguage, Remove-WinMediaExtraLanguage, Invoke-WinMediaBootWimAdd, Get-WinMediaBootBackground, Get-WinMediaBootSoftwareCommand, Set-WinMediaBootSoftware, New-WinMediaBootWimFromWinRE

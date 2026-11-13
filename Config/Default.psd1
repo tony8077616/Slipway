@@ -16,7 +16,7 @@
     MountParallelCount   = 1                     # 同時掛載的 index 數；1 = 現行的單一程序流程
     MountSpaceEstimateGB = 30                    # 每個掛載需求的估計空間（GB）；僅警告，未實測，不含更新解壓
     OptimizationTarget   = ''                    # Optimize-WindowsImage 的 -OptimizationTarget；空白 = 不執行（文件只列 WIMBoot，僅適用於 WIMBoot 映像）
-    WinPEUpdate          = 'SafeOS'              # WinPE（WinRE／boot.wim）核心更新路線：'SafeOS'＝套用 SafeOS DU（已 e2e 驗證，預設）；'Lcu'＝WinRE 套 SSU＋SafeOS DU，boot.wim 另以原始 MSU 直接加入最新 LCU（e2e 實測 KB5127648 判定 Not applicable，無效果）
+    WinPEUpdate          = 'Lcu'                 # WinPE（WinRE／boot.wim）核心更新路線：'Lcu'＝WinRE 套 SSU＋SafeOS DU，boot.wim 另以目標 MSU 檔案路徑直接加入 LCU（預設；需 PackageDir 與目標 LCU 的 checkpoint 同資料夾，見 README）；'SafeOS'＝只套用 SafeOS DU（舊預設；boot.wim 核心停在 SafeOS DU 的版本，full3 實測為 9817，可能低於安裝映像）
     UpdateBootFiles      = $true                 # 選項 B（convert-UUP UpdtBootFiles）：改用安裝映像內的 *_EX 開機檔（bootx64、bootmgr、efisys、memtest、boot.stl、fonts、cipolicies）；注意為 UEFI CA 2023 開機檔，韌體 db 沒有 2023 CA 的機器開啟 Secure Boot 可能無法開機
     Wimlib               = @{ Path = '' }        # 非空 = 手動指定 wimlib-imagex.exe，ESD 轉換改用 wimlib；檔案不存在時自動下載 1.14.5（SHA-256 校驗）；空白 = ESD→WIM 用 DISM，WIM→ESD 與 boot.wim 同步、export、optimize 都會使用 wimlib；%LOCALAPPDATA% 快取內沒有有效 zip、模組也沒有內附 zip 時才自動下載
     DismProvider         = 'Inbox'               # 'Inbox' 或 'ADK'，見 §3.4

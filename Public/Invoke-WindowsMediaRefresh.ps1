@@ -49,7 +49,7 @@
         '6 install.wim 各索引：SSU → 語言包與 FoD → 最新 LCU（含 checkpoint）→ cleanup（CBS 待處理只警告）→ NetFx3 → .NET CU → 移除 Appx（若設定）→ 加入 LXP → 驅動 → 放入 WinRE → 選項 UpdateBootFiles（預設開）時取用已套用 LCU 映像的 _EX 開機檔',
         '7 虛擬版本（僅來源為 EnterpriseS 且在 Indexes 目標內；§2.7.4）',
         '8 展開 Setup DU 到 sources（第 26 列）',
-        '9 boot.wim 索引 1、2：WinPEUpdate 為 Lcu 時套用最新 LCU（含 checkpoint；SafeOS 路線跳過）→ cleanup → 驅動（若設定，Boot 目標）；索引 2 內 boot manager 覆蓋媒體（第 28 列；選項 UpdateBootFiles 已套用 _EX 開機檔時跳過）；兩個索引卸載後，以 wimlib update 把媒體 sources\ 覆蓋 WinPE 索引 2 的同名檔（convert-UUP bootwim.txt／bootmui.txt，方向與 MS 文件第 27 列相反）；最後 boot.wim 做 export（保留可開機索引）與 optimize',
+        '9 boot.wim 索引 1、2：WinPEUpdate 為 Lcu 時以目標 MSU 檔案路徑加入（需與 checkpoint 同資料夾；SafeOS 路線跳過）→ cleanup → 驅動（若設定，Boot 目標）；索引 2 內 boot manager 覆蓋媒體（第 28 列；選項 UpdateBootFiles 已套用 _EX 開機檔時跳過）；兩個索引卸載後，以 wimlib update 把媒體 sources\ 覆蓋 WinPE 索引 2 的同名檔（convert-UUP bootwim.txt／bootmui.txt，方向與 MS 文件第 27 列相反）；最後 boot.wim 做 export（保留可開機索引）與 optimize',
         '10 移除來源 EnterpriseS（僅 DeleteSourceEdition 且已建立虛擬版本）後，依 §2.7.5 處理 ei.cfg',
         '11 輸出：oscdimg 雙開機 ISO 或 install.esd（寫入 OutputDir）',
         '12 成功後清除 WorkDir 下的 media、winre、expand；MountDir 若由本次建立則一併清除；logs 保留'
@@ -60,8 +60,8 @@
 
     # 參數覆寫設定檔；LogDir 與 OperationLog 跟隨 WorkDir
     $Config = $Config.Clone()
-    # 自訂設定檔可能沒有此鍵；缺少時採預設路線 SafeOS（驗證不接受 $null）
-    if (-not $Config.ContainsKey('WinPEUpdate')) { $Config.WinPEUpdate = 'SafeOS' }
+    # 自訂設定檔可能沒有此鍵；缺少時採預設路線 Lcu（驗證不接受 $null）
+    if (-not $Config.ContainsKey('WinPEUpdate')) { $Config.WinPEUpdate = 'Lcu' }
     # 空白 = 腳本所在磁碟根目錄\WinMediaWork，避免直接放在系統磁碟區根目錄（除非腳本本身位於 C 槽）
     if (-not $WorkDir -and [string]::IsNullOrWhiteSpace($Config.WorkDir)) {
         $WorkDir = Join-Path -Path ([System.IO.Path]::GetPathRoot($PSScriptRoot)) -ChildPath 'WinMediaWork'
@@ -469,8 +469,9 @@
             param($mounted)
             # 不單獨加入 SSU：獨立加入的 SSU 會被暫停（pended），其後的 LCU 會被略過、CBS 停留在 9441；LCU 套件本身已含 SSU（實測單獨加入即升至 9711）
             # 直接套用目標 LCU msu（資料夾模式會先處理較舊的 checkpoint msu，實測 KB5043080 回 0x80070228）
-            # 只有 Lcu 路線在此以原始 MSU 直接加入 LCU；實測 DISM 判定 Not applicable（無效果），SafeOS 路線的核心版本由步驟 5 的 SafeOS DU 提供
+            # Lcu 路線以目標 MSU 檔案路徑直接加入（非資料夾模式）；MSU 所在資料夾必須同時有目標 LCU 的 checkpoint，否則 Add 可能靜默失敗（full2 實測 Add 後 ntoskrnl 仍為 9817），見 README。SafeOS 路線的核心版本由步驟 5 的 SafeOS DU 提供
             if ($Config.WinPEUpdate -eq 'Lcu') {
+                $lcuBefore = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
                 Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
                     Add-WindowsPackage -Path $mounted -PackagePath $cumulative.Target @common -LogLevel $Config.DismLogLevel | Out-Null
                 }
@@ -479,6 +480,7 @@
                 Repair-WindowsImage -Path $mounted -StartComponentCleanup @common -LogLevel $Config.DismLogLevel | Out-Null
             }
             $bootKernel = (Get-Item -LiteralPath (Join-Path -Path $mounted -ChildPath 'Windows\System32\ntoskrnl.exe')).VersionInfo.FileVersion
+            if ($Config.WinPEUpdate -eq 'Lcu') { Test-WinMediaLcuApplied -BeforeKernel $lcuBefore -AfterKernel $bootKernel -InstallKernel $installKernel.Version -BootIndex $bootIndex }
             Test-WinMediaKernelConsistency -BootKernel $bootKernel -WinreKernel $winreKernel.Version -InstallKernel $installKernel.Version -WinreBaseKernel $winreKernel.Base -BootIndex $bootIndex
             if ($driverSet) { Install-WinMediaDriver -MountPath $mounted -Target 'Boot' -DriverSet $driverSet -ForceUnsigned $forceUnsigned -Config $Config }
             if ($bootIndex -eq 2) {

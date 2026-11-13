@@ -25,9 +25,15 @@ BeforeAll {
     }
 }
 
-Describe 'WinPEUpdate 路線選項（SafeOS 為預設；Lcu 為 convert-UUP 路線）' -Tag 'Unit' {
-    It 'Default.psd1 的預設值為 SafeOS' {
-        $script:defaults.WinPEUpdate | Should -Be 'SafeOS'
+Describe 'WinPEUpdate 路線選項（Lcu 為預設；SafeOS 為 WinRE 路線的 SafeOS DU）' -Tag 'Unit' {
+    It 'Default.psd1 的預設值為 Lcu' {
+        $script:defaults.WinPEUpdate | Should -Be 'Lcu'
+    }
+
+    It 'Lcu 區塊在 Add 前記錄 ntoskrnl，Add 後以 bootKernel 呼叫 Test-WinMediaLcuApplied' {
+        $source = Get-Content -LiteralPath $script:pipelineFile -Raw
+        $source | Should -Match '\$lcuBefore\s*=\s*\(Get-Item'
+        $source | Should -Match 'Test-WinMediaLcuApplied -BeforeKernel \$lcuBefore -AfterKernel \$bootKernel'
     }
 
     It 'SafeOS DU 於 WinRE 套用，且守衛不依 WinPEUpdate 分岔' {
@@ -42,9 +48,9 @@ Describe 'WinPEUpdate 路線選項（SafeOS 為預設；Lcu 為 convert-UUP 路�
         foreach ($call in $calls) { $call.Guard | Should -Match "WinPEUpdate -eq 'Lcu'" }
     }
 
-    It '設定檔缺少 WinPEUpdate 鍵時於 Clone 後補上 SafeOS' {
+    It '設定檔缺少 WinPEUpdate 鍵時於 Clone 後補上 Lcu（與 Default.psd1 一致）' {
         $source = Get-Content -LiteralPath $script:pipelineFile -Raw
-        $source | Should -Match 'ContainsKey\(.WinPEUpdate.\)'
+        $source | Should -Match "ContainsKey\('WinPEUpdate'\)\) \{ \`$Config\.WinPEUpdate = 'Lcu' \}"
     }
 
     It '驗證拒絕未知的 WinPEUpdate 值' {
