@@ -336,6 +336,11 @@
             $lcuVer = Get-WinMediaPackageVersion -Package $lcuPath -ExpandDir $expandDir -Kind RollupFix -Config $Config
             if ($lcuVer) { $lcuVersions[$lcuPath] = $lcuVer }
         }
+        if ($lcuVersions.Count -lt @($candidates).Count) {
+            # 有候選讀不到版本時不比版本（缺值會被當成 0.0.0.0，可能把目標誤判為 checkpoint），整組退回 KB 編號排序
+            Write-WinMediaLog -Config $Config -Level Warning -Message 'LCU 候選有無法讀取版本者，本次改用 KB 編號排序判定目標。'
+            $lcuVersions = @{}
+        }
         Resolve-WinMediaCumulativeSet -Paths @($candidates) -Config $Config -Versions $lcuVersions
     }
     if (-not $cumulative) { throw '缺少最新 LCU（PackageDir 內沒有 .msu 累積更新）。' }
@@ -368,7 +373,14 @@
         }
         # 目標 CU 內的 SSU 排在前面，版本相同時優先採用目標 CU 的 SSU
         $ssuOrder = @(@($targetSsu) + @($categories.SSU | Where-Object { $targetSsu -notcontains $_ }))
-        $ssu = Select-WinMediaNewestPackage -Paths $ssuOrder -Versions $ssuVersions
+        if ($ssuVersions.Count -eq @($categories.SSU).Count) {
+            $ssu = Select-WinMediaNewestPackage -Paths $ssuOrder -Versions $ssuVersions
+        }
+        else {
+            # 有 SSU 讀不到版本時退回舊規則：目標 CU 內的 SSU 優先，不以缺值比較
+            Write-WinMediaLog -Config $Config -Level Warning -Message 'SSU 有無法讀取版本者，本次改用目標 CU 內的 SSU（或排序第一者）。'
+            $ssu = $ssuOrder | Select-Object -First 1
+        }
         if (@($categories.SSU).Count -gt 1) {
             Write-WinMediaLog -Config $Config -Level Info -Message "SSU 依版本保留最新：$(Split-Path -Path $ssu -Leaf)（版本 $($ssuVersions[$ssu]) ，無版本資訊者以 0.0.0.0 計）。"
         }

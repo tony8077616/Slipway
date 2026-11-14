@@ -159,14 +159,16 @@ function Get-WinMediaPackageVersion {
     $version = Read-WinMediaIdentityVersion -MumPath @($roots | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter 'update.mum' -Recurse -File } | ForEach-Object { $_.FullName }) -NamePattern $namePattern
     if ($version) { return $version }
 
-    $dest = Join-Path -Path $ExpandDir -ChildPath (Join-Path -Path '_version' -ChildPath $leaf)
     foreach ($wim in @($roots | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter '*.wim' -Recurse -File } | ForEach-Object { $_.FullName })) {
+        # 每個 wim 各用一個子目錄，避免後一個 wim 誤讀前一個 wim 抽出的 update.mum
+        $dest = Join-Path -Path $ExpandDir -ChildPath (Join-Path -Path '_version' -ChildPath (Join-Path -Path $leaf -ChildPath (Split-Path -Path $wim -Leaf)))
         if (-not (Test-Path -LiteralPath (Join-Path -Path $dest -ChildPath 'update.mum'))) {
             New-Item -ItemType Directory -Path $dest -Force | Out-Null
             try {
                 $null = Invoke-WinMediaWimlib -ArgumentList @('extract', $wim, '1', 'update.mum', "--dest-dir=$dest", '--no-acls', '--no-attributes') -Config $Config
             }
             catch {
+                Write-WinMediaLog -Config $Config -Level Warning -Message "無法從 $(Split-Path -Path $wim -Leaf) 讀取 update.mum 版本：$($_.Exception.Message)"
                 continue
             }
         }
