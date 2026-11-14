@@ -66,15 +66,14 @@ Describe 'Invoke-WinMediaInstallIndexImageUpdate：啟用套件（eKB）安裝�
         $script:added | Should -Contain 'C:\stage'
     }
 
-    It 'eKB 安裝失敗：記錄 Warning、略過並繼續安裝 LCU（刻意偏離 convert-UUP 的中止）' {
+    It 'eKB 安裝失敗：拋出例外並中止，不繼續安裝 LCU（對齊 convert-UUP :errmount）' {
         Mock -ModuleName WinMediaRefresh Test-WinMediaEnablementApplicable { $true }
         Mock -ModuleName WinMediaRefresh Add-WindowsPackage {
             $script:added += [string]$PesterBoundParameters['PackagePath']
             if ([string]$PesterBoundParameters['PackagePath'] -eq $script:ekbPath) { throw 'DISM 0x800f0823' }
         }
-        { & $script:invokeImage $script:imgArgs | Out-Null } | Should -Not -Throw
-        $script:added | Should -Contain 'C:\stage'
-        (Get-Content -LiteralPath $script:config.LogFile -Raw -Encoding UTF8) | Should -Match '啟用套件安裝失敗'
+        { & $script:invokeImage $script:imgArgs | Out-Null } | Should -Throw
+        $script:added | Should -Not -Contain 'C:\stage'
     }
 }
 

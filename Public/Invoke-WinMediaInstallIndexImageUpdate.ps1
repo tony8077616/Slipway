@@ -36,15 +36,9 @@
             Write-WinMediaLog -Config $Config -Level Info -Message "啟用套件不適用此索引（Edition 未命中或為 LTSC），略過：$(Split-Path -Path $ekb.Path -Leaf)"
             continue
         }
-        try {
-            Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-                Add-WindowsPackage -Path $mounted -PackagePath $ekb.Path @common -LogLevel $Config.DismLogLevel | Out-Null
-            } | Out-Null
-        }
-        catch {
-            # 刻意偏離 convert-UUP（:errmount 中止）：eKB 失敗只記 Warning 並繼續，不會中止索引；報告需明列此差異
-            Write-WinMediaLog -Config $Config -Level Warning -Message "啟用套件安裝失敗，略過並繼續（convert-UUP 此處會中止）：$(Split-Path -Path $ekb.Path -Leaf)：$($_.Exception.Message)"
-        }
+        Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
+            Add-WindowsPackage -Path $mounted -PackagePath $ekb.Path @common -LogLevel $Config.DismLogLevel | Out-Null
+        } | Out-Null
     }
     # 文件步驟 10–11：語言包與 FoD 必須在最新 LCU 之前注入
     Install-WinMediaLangFod -MountPath $mounted -Set $langFod -Config $Config | Out-Null
