@@ -30,6 +30,7 @@
     } | Out-Null
     # 啟用套件（eKB）：convert-UUP 把 eKB 放在 ldr 批次最前面（cumulative 之前）；依映像 Edition 套件判定，LTSC 略過
     $packagesDir = Join-Path -Path $mounted -ChildPath 'Windows\servicing\Packages'
+    $ekb = $null
     foreach ($ekb in @($enablement | Where-Object { $_ })) {
         if (-not (Test-WinMediaEnablementApplicable -Editions @($ekb.Editions) -PackagesDir $packagesDir)) {
             Write-WinMediaLog -Config $Config -Level Info -Message "啟用套件不適用此索引（Edition 未命中或為 LTSC），略過：$(Split-Path -Path $ekb.Path -Leaf)"
@@ -41,7 +42,7 @@
             } | Out-Null
         }
         catch {
-            # 刻意偏離 convert-UUP（:errmount 中止）：eKB 失敗只記錄並繼續，結果會列在報告中
+            # 刻意偏離 convert-UUP（:errmount 中止）：eKB 失敗只記 Warning 並繼續，不會中止索引；報告需明列此差異
             Write-WinMediaLog -Config $Config -Level Warning -Message "啟用套件安裝失敗，略過並繼續（convert-UUP 此處會中止）：$(Split-Path -Path $ekb.Path -Leaf)：$($_.Exception.Message)"
         }
     }

@@ -385,7 +385,7 @@
     $lcuStage = New-WinMediaUpdateStage -Target $cumulative.Target -Checkpoints @($cumulative.Checkpoints) -StageDir $stageDir -Config $Config
     $dotNet = $categories.DotNetCU | Select-Object -First 1
     # 啟用套件（eKB）：每個 eKB 的 Edition 清單只算一次，各索引再依映像判定是否套用
-    $enablementSet = @($categories.Enablement | ForEach-Object {
+    $enablement = @($categories.Enablement | ForEach-Object {
             $editions = @(Get-WinMediaEnablementEdition -Package $_ -ExpandDir $expandDir)
             if ($editions.Count -eq 0) {
                 Write-WinMediaLog -Config $Config -Level Warning -Message "啟用套件無法讀取 Edition，略過：$(Split-Path -Path $_ -Leaf)"
@@ -458,7 +458,7 @@
         $parallelConfig = @{}
         foreach ($k in $Config.Keys) { $parallelConfig[$k] = $Config[$k] }
         $parallelConfig['MountDir'] = $mountDir
-        $baseJob = @{ mountSwitches = $mountSwitches; Config = $parallelConfig; ssu = $ssu; lcuStage = $lcuStage; langFod = $langFod; dotNet = $dotNet; enablement = $enablementSet; appxList = $appxList; storeSet = $storeSet; lxpItems = $lxpItems; driverSet = $driverSet; forceUnsigned = $forceUnsigned; resetBaseOS = $resetBaseOS; common = $common; winreWim = $winreWim }
+        $baseJob = @{ mountSwitches = $mountSwitches; Config = $parallelConfig; ssu = $ssu; lcuStage = $lcuStage; langFod = $langFod; dotNet = $dotNet; enablement = $enablement; appxList = $appxList; storeSet = $storeSet; lxpItems = $lxpItems; driverSet = $driverSet; forceUnsigned = $forceUnsigned; resetBaseOS = $resetBaseOS; common = $common; winreWim = $winreWim }
         $parallelDir = Join-Path -Path $workDir -ChildPath 'parallel'
         # 登記前先守衛：來源或成品位於平行目錄之內時，登記的清空會刪除它們（與 L196、L202 同理）
         if (Test-PathWithin -Child $SourceIso -Parent $parallelDir) { throw "來源映像位於平行工作目錄之內，會被清空：$SourceIso" }
@@ -477,7 +477,7 @@
     foreach ($index in $targets) {
         Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) @mountSwitches -Config $Config -Action {
             param($mounted)
-        Invoke-WinMediaInstallIndexUpdate -mounted $mounted -ssu $ssu -lcuStage $lcuStage -langFod $langFod -dotNet $dotNet -enablement $enablementSet -appxList $appxList -storeSet $storeSet -lxpItems $lxpItems -driverSet $driverSet -forceUnsigned $forceUnsigned -resetBaseOS $resetBaseOS -common $common -IsFirstTarget:($index -eq $targets[0]) -sourcesDir $sourcesDir -winreWim $winreWim -isEsdSource:$isEsdSource -mediaDir $mediaDir -Config $Config -installKernel $installKernel -buildInfo $buildInfo -bootEx $bootEx
+        Invoke-WinMediaInstallIndexUpdate -mounted $mounted -ssu $ssu -lcuStage $lcuStage -langFod $langFod -dotNet $dotNet -enablement $enablement -appxList $appxList -storeSet $storeSet -lxpItems $lxpItems -driverSet $driverSet -forceUnsigned $forceUnsigned -resetBaseOS $resetBaseOS -common $common -IsFirstTarget:($index -eq $targets[0]) -sourcesDir $sourcesDir -winreWim $winreWim -isEsdSource:$isEsdSource -mediaDir $mediaDir -Config $Config -installKernel $installKernel -buildInfo $buildInfo -bootEx $bootEx
         } | Out-Null
     }
     }
