@@ -12,6 +12,7 @@
         $lcuStage,
         $langFod,
         $dotNet,
+        $enablement,
         $appxList,
         $storeSet,
         $lxpItems,
@@ -27,6 +28,23 @@
     Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
         Add-WindowsPackage -Path $mounted -PackagePath $ssu @common -LogLevel $Config.DismLogLevel | Out-Null
     } | Out-Null
+    # 啟用套件（eKB）：convert-UUP 把 eKB 放在 ldr 批次最前面（cumulative 之前）；依映像 Edition 套件判定，LTSC 略過
+    $packagesDir = Join-Path -Path $mounted -ChildPath 'Windows\servicing\Packages'
+    foreach ($ekb in @($enablement | Where-Object { $_ })) {
+        if (-not (Test-WinMediaEnablementApplicable -Editions @($ekb.Editions) -PackagesDir $packagesDir)) {
+            Write-WinMediaLog -Config $Config -Level Info -Message "啟用套件不適用此索引（Edition 未命中或為 LTSC），略過：$(Split-Path -Path $ekb.Path -Leaf)"
+            continue
+        }
+        try {
+            Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
+                Add-WindowsPackage -Path $mounted -PackagePath $ekb.Path @common -LogLevel $Config.DismLogLevel | Out-Null
+            } | Out-Null
+        }
+        catch {
+            # 刻意偏離 convert-UUP（:errmount 中止）：eKB 失敗只記錄並繼續，結果會列在報告中
+            Write-WinMediaLog -Config $Config -Level Warning -Message "啟用套件安裝失敗，略過並繼續（convert-UUP 此處會中止）：$(Split-Path -Path $ekb.Path -Leaf)：$($_.Exception.Message)"
+        }
+    }
     # 文件步驟 10–11：語言包與 FoD 必須在最新 LCU 之前注入
     Install-WinMediaLangFod -MountPath $mounted -Set $langFod -Config $Config | Out-Null
     # 文件步驟 13：最新 LCU（連同前置 checkpoint，經暫存資料夾）

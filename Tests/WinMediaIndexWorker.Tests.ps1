@@ -60,6 +60,7 @@ BeforeAll {
             lcuStage      = Join-Path -Path $TestDrive -ChildPath 'lcu'
             langFod       = [pscustomobject]@{ LangPacks = @(); Fod = @(); Deferred = @() }
             dotNet        = Join-Path -Path $TestDrive -ChildPath 'dotnet.msu'
+            enablement    = @()
             appxList      = $null
             storeSet      = [pscustomobject]@{ Frameworks = @(); Apps = @(); Hashes = @{} }
             lxpItems      = $lxpItems
@@ -101,16 +102,16 @@ Describe 'Parallel index worker：靜態結構（AST）' -Tag 'Unit' {
         (Test-Path -LiteralPath $script:starterFile -PathType Leaf) | Should -BeTrue -Because 'file missing: Start-WinMediaIndexWorker.ps1'
     }
 
-    It 'Parallel: worker 的 import 清單剛好 11 個模組，且不含 BootFiles／Defender／Path／WinMediaRefresh' {
+    It 'Parallel: worker 的 import 清單剛好 12 個模組，且不含 BootFiles／Defender／Path／WinMediaRefresh' {
         (Test-Path -LiteralPath $script:workerFile -PathType Leaf) | Should -BeTrue -Because 'file missing: WinMediaIndexWorker.psm1'
         $ast = Get-ScriptAst -Path $script:workerFile
         $imports = Find-Ast -Ast $ast -Type 'CommandAst' -Filter { $_.GetCommandName() -eq 'Import-Module' }
-        $imports.Count | Should -Be 11
+        $imports.Count | Should -Be 12
         $text = ($imports | ForEach-Object { $_.Extent.Text }) -join "`n"
         foreach ($forbidden in 'WinMediaBootFiles', 'WinMediaDefender', 'WinMediaPath', 'WinMediaRefresh') {
             $text | Should -Not -Match $forbidden -Because "worker must not import $forbidden"
         }
-        foreach ($expected in 'WinMediaLog.psm1', 'WinMediaOperation.psm1', 'WinMediaDism.psm1', 'WinMediaOptimize.psm1', 'WinMediaImage.psm1', 'WinMediaLangFod.psm1', 'WinMediaDriver.psm1', 'WinMediaLxp.psm1', 'WinMediaStoreApps.psm1', 'WinMediaAppx.psm1', 'WinMediaIndexInfo.psm1') {
+        foreach ($expected in 'WinMediaLog.psm1', 'WinMediaOperation.psm1', 'WinMediaDism.psm1', 'WinMediaOptimize.psm1', 'WinMediaImage.psm1', 'WinMediaLangFod.psm1', 'WinMediaDriver.psm1', 'WinMediaLxp.psm1', 'WinMediaStoreApps.psm1', 'WinMediaAppx.psm1', 'WinMediaIndexInfo.psm1', 'WinMediaPackage.psm1') {
             $text | Should -Match ([regex]::Escape($expected)) -Because "worker must import $expected"
         }
     }
@@ -211,6 +212,7 @@ Describe 'Parallel index worker：Invoke-WinMediaIndexWorkerJob 行為（全部 
             Mock -ModuleName WinMediaIndexWorker Install-WinMediaStoreApp { }
             Mock -ModuleName WinMediaIndexWorker Install-WinMediaLxp { }
             Mock -ModuleName WinMediaIndexWorker Remove-WinMediaAppx { }
+            Mock -ModuleName WinMediaIndexWorker Test-WinMediaEnablementApplicable { $false }
             Mock -ModuleName WinMediaIndexWorker Get-WinMediaBuildInfo { @{ Build = '26100.1' } }
             Mock -ModuleName WinMediaIndexWorker Get-Item { [pscustomobject]@{ VersionInfo = [pscustomobject]@{ FileVersion = '10.0.26100.1' } } }
             # 其餘會改檔案的內建 cmdlet：路徑不在 TestDrive 下就中止

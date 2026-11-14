@@ -78,11 +78,11 @@ function Get-WinMediaPackageCategory {
             'LanguagePack' { $result.LanguagePack += $package.FullName }
             'FoD'          { $result.FoD += $package.FullName }
             'Enablement'   {
-                # 26H2 啟用套件（eKB）：母檔已含對應功能，略過不套用；版本取自 cab 內的啟用套件 mum 檔名
+                # 啟用套件（eKB）：安裝前依 convert-UUP 條件判定是否套用（Edition 命中且非 LTSC），見 Test-WinMediaEnablementApplicable
                 $result.Enablement += $package.FullName
                 $enableMum = Get-ChildItem -LiteralPath (Join-Path -Path $ExpandDir -ChildPath $package.Name) -Recurse -File -Filter '*-Version-Enablement-Package~*.mum' | Select-Object -First 1
                 $version = if ($enableMum -and $enableMum.Name -match '~(\d+\.\d+\.\d+\.\d+)\.mum$') { $Matches[1] } else { '未知' }
-                Write-WinMediaLog -Config $Config -Level Info -Message "26H2 啟用套件略過（母檔已含對應功能，不套用）：$($package.Name)，cab 版本 $version。"
+                Write-WinMediaLog -Config $Config -Level Info -Message "啟用套件（eKB）：$($package.Name)，cab 版本 $version，於各索引依 Edition 條件判定是否套用。"
             }
             default        { $result.Unclassified += $package.FullName }
         }
@@ -223,6 +223,43 @@ function Select-WinMediaNewestPackage {
     return $best
 }
 
+function Get-WinMediaEnablementEdition {
+    # eKB 的 Edition 清單：update.mum 內的 Microsoft-Windows-<X>Edition identity（convert-UUP :enablement 3413 的 findstr Edition）
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$Package,
+        [Parameter(Mandatory)][string]$ExpandDir
+    )
+
+    $root = Join-Path -Path $ExpandDir -ChildPath ([System.IO.Path]::GetFileName($Package))
+    $mum = Get-ChildItem -LiteralPath $root -Filter 'update.mum' -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $mum) { return @() }
+    $text = Get-Content -LiteralPath $mum.FullName -Raw
+    return @([regex]::Matches($text, 'name="(Microsoft-Windows-[A-Za-z]+Edition)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+}
+
+function Test-WinMediaEnablementApplicable {
+    # convert-UUP :enablement（3411–3423）：映像的 Windows\Servicing\Packages 內有 eKB 任一 Edition 套件才套用；
+    # LTSC 映像略過（convert-UUP 的 LtscAddEP 預設 0；本工具不提供 1／2）。LTSC 判定同 convert-UUP 2954–2958
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Editions,
+        [Parameter(Mandatory)][string]$PackagesDir
+    )
+
+    if (-not (Test-Path -LiteralPath $PackagesDir)) { return $false }
+    $names = @(Get-ChildItem -LiteralPath $PackagesDir -Filter '*.mum' -File | ForEach-Object { $_.Name })
+    $hci = [bool]($names | Where-Object { $_ -like 'Microsoft-Windows-ServerAzureStackHCI*Edition~*.mum' })
+    $ltsc = (-not $hci) -and [bool]($names | Where-Object { $_ -like 'Microsoft-Windows-EnterpriseS*Edition~*.mum' -or $_ -like 'Microsoft-Windows-Server*Edition~*.mum' })
+    if ($ltsc) { return $false }
+    foreach ($edition in @($Editions)) {
+        if ($names | Where-Object { $_ -like "$edition*.mum" }) { return $true }
+    }
+    return $false
+}
+
 function Test-WinMediaWimFile {
     # 讀取檔頭 8 位元組判斷是否為 WIM（MSWIM\0\0\0）；只讀前 8 位元組，避免 4.5 GB 的檔案被整包載入
     [CmdletBinding()]
@@ -336,4 +373,4 @@ function Get-WinMediaPackageCategoryByContent {
     return 'Unknown'
 }
 
-Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent, Get-WinMediaMumXVersion, Get-WinMediaPackageVersion, Select-WinMediaNewestPackage
+Export-ModuleMember -Function Get-WinMediaPackageCategory, Get-WinMediaPackageCategoryByName, Get-WinMediaPackageCategoryByContent, Get-WinMediaMumXVersion, Get-WinMediaPackageVersion, Select-WinMediaNewestPackage, Get-WinMediaEnablementEdition,Test-WinMediaEnablementApplicable
