@@ -81,7 +81,7 @@ Describe 'Invoke-WinMediaInstallIndexImageUpdate：啟用套件（eKB）安裝�
 Describe 'enablement 接線：呼叫 ImageUpdate 時 -enablement 與 -appxList 是獨立參數（AST）' -Tag 'Unit' {
     BeforeAll {
         $script:root = Split-Path -Parent $PSScriptRoot
-        function script:Get-CallParamNames([string]$Path) {
+        function script:Get-CallParamName([string]$Path) {
             $errs = $null
             $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$errs)
             $cmd = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-WinMediaInstallIndexImageUpdate' }, $true) | Select-Object -First 1
@@ -91,13 +91,13 @@ Describe 'enablement 接線：呼叫 ImageUpdate 時 -enablement 與 -appxList �
     }
 
     It 'Invoke-WinMediaInstallIndexUpdate 的呼叫包含獨立的 enablement 與 appxList' {
-        $names = Get-CallParamNames -Path (Join-Path -Path $script:root -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1')
+        $names = Get-CallParamName -Path (Join-Path -Path $script:root -ChildPath 'Public\Invoke-WinMediaInstallIndexUpdate.ps1')
         $names | Should -Contain 'enablement'
         $names | Should -Contain 'appxList'
     }
 
     It 'worker 的呼叫包含獨立的 enablement 與 appxList' {
-        $names = Get-CallParamNames -Path (Join-Path -Path $script:root -ChildPath 'Modules\WinMediaIndexWorker.psm1')
+        $names = Get-CallParamName -Path (Join-Path -Path $script:root -ChildPath 'Modules\WinMediaIndexWorker.psm1')
         $names | Should -Contain 'enablement'
         $names | Should -Contain 'appxList'
     }
