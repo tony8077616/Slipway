@@ -12,6 +12,7 @@ Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMed
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaStoreApps.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaAppx.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaIndexInfo.psm1') -Force
+Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaPackage.psm1') -Force
 
 . (Join-Path -Path $PSScriptRoot -ChildPath '..\Public\Invoke-WinMediaInstallIndexImageUpdate.ps1')
 
@@ -38,7 +39,7 @@ function Invoke-WinMediaIndexWorkerJob {
     }
 
     Mount-WinMediaImage -ImagePath $Job.ImagePath -Index $Job.Index -MountPath $Job.MountPath @mountSwitches -Config $Config -Action {
-        $holder.Result = Invoke-WinMediaInstallIndexImageUpdate -mounted $Job.MountPath -ssu $Job.ssu -lcuStage $Job.lcuStage -langFod $Job.langFod -dotNet $Job.dotNet -appxList $Job.appxList -storeSet $Job.storeSet -lxpItems $Job.lxpItems -driverSet $rebuiltDriverSet -forceUnsigned $Job.forceUnsigned -resetBaseOS $Job.resetBaseOS -common $Job.common -IsFirstTarget ([bool]$Job.IsFirstTarget) -winreWim $Job.winreWim -Config $Config
+        $holder.Result = Invoke-WinMediaInstallIndexImageUpdate -mounted $Job.MountPath -ssu $Job.ssu -lcuStage $Job.lcuStage -langFod $Job.langFod -dotNet $Job.dotNet -enablement $Job.enablement -appxList $Job.appxList -storeSet $Job.storeSet -lxpItems $Job.lxpItems -driverSet $rebuiltDriverSet -forceUnsigned $Job.forceUnsigned -resetBaseOS $Job.resetBaseOS -common $Job.common -IsFirstTarget ([bool]$Job.IsFirstTarget) -winreWim $Job.winreWim -Config $Config
     }
 
     # result 在卸載之後才寫：它是子程序完成的標記，父程序只有看到檔案存在才視為成功

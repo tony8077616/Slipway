@@ -42,13 +42,13 @@ Describe 'install 索引更新抽出為函式（Step 12a，行為不變）' -Tag
                     $name
                 })
         }
-        ($seen -join ',') | Should -Be 'Add-WindowsPackage,Install-WinMediaLangFod,Add-WindowsPackage,Repair-WindowsImage,Optimize-WinMediaImage,Install-WinMediaDeferredFod,Add-WindowsPackage,Remove-WinMediaAppx,Install-WinMediaStoreApp,Install-WinMediaLxp,Install-WinMediaDriver,Get-WinMediaBuildInfo,Invoke-WinMediaOperation:ReplaceWinRE,Invoke-WinMediaOperation:CopyXmlLite,Copy-WinMediaUpdatedBootFiles'
+        ($seen -join ',') | Should -Be 'Add-WindowsPackage,Add-WindowsPackage,Install-WinMediaLangFod,Add-WindowsPackage,Repair-WindowsImage,Optimize-WinMediaImage,Install-WinMediaDeferredFod,Add-WindowsPackage,Remove-WinMediaAppx,Install-WinMediaStoreApp,Install-WinMediaLxp,Install-WinMediaDriver,Get-WinMediaBuildInfo,Invoke-WinMediaOperation:ReplaceWinRE,Invoke-WinMediaOperation:CopyXmlLite,Copy-WinMediaUpdatedBootFiles'
     }
 
     It '主流程呼叫點傳入函式的每一個參數，且以同名變數傳入（IsFirstTarget 例外）' {
         $fn = [System.Management.Automation.Language.Parser]::ParseFile($script:actionPath, [ref]$null, [ref]$null)
         $names = @($fn.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true).Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
-        $names.Count | Should -Be 21
+        $names.Count | Should -Be 22
         $call = @($script:mainAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-WinMediaInstallIndexUpdate' }, $true))
         $call.Count | Should -Be 1
         $el = @($call[0].CommandElements)

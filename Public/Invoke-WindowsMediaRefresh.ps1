@@ -317,16 +317,30 @@
     # Build 路徑只採用本次下載的檔案（依檔名比對），避免 PackageDir 殘留的舊 SafeOS、SetupDU、.NET、LCU 被套用
     if ($buildSet) {
         $setNames = @($buildSet.Files | ForEach-Object { Split-Path -Path $_ -Leaf })
-        foreach ($key in 'SafeOS', 'SetupDU', 'DotNetCU', 'LCU', 'Checkpoint') {
+        foreach ($key in 'SafeOS', 'SetupDU', 'DotNetCU', 'LCU', 'Checkpoint', 'Enablement') {
             $categories.$key = @($categories.$key | Where-Object { $setNames -contains (Split-Path -Path $_ -Leaf) })
         }
     }
     if ($categories.SSU.Count -eq 0) { throw '缺少 SSU（可從合併 CU 取出，§11.3）。' }
-    # 目標 CU 與前置 checkpoint：下載路徑只用本次下載的檔案；手動路徑用 PackageDir 內的 LCU（KB 較小者視為 checkpoint）
+    # 目標 CU 與前置 checkpoint：下載路徑只用本次下載的檔案；手動路徑用 PackageDir 內的 LCU，依版本判定（任一候選缺版本時整組改依 KB 編號）
     $candidates = if ($downloaded.Count -gt 0) { $downloaded } else { @($categories.LCU) + @($categories.Checkpoint) }
     if (@($candidates).Count -eq 0) { throw '缺少最新 LCU。' }
     # Build 路徑直接採用 Save-WinMediaBuildSet 的判定結果；手動路徑才對候補清單重新判定
-    $cumulative = if ($buildSet) { [pscustomobject]@{ Target = $buildSet.Target; Checkpoints = @($buildSet.Checkpoints) } } else { Resolve-WinMediaCumulativeSet -Paths @($candidates) -Config $Config }
+    $cumulative = if ($buildSet) {
+        [pscustomobject]@{ Target = $buildSet.Target; Checkpoints = @($buildSet.Checkpoints) }
+    }
+    else {
+        # 手動路徑依 identity 版本排序（convert-UUP :chklcu）；缺版本的判定與警告在 Resolve-WinMediaCumulativeSet
+        $lcuVersions = @{}
+        foreach ($lcuPath in @($candidates)) {
+            $lcuVer = Get-WinMediaPackageVersion -Package $lcuPath -ExpandDir $expandDir -Kind RollupFix -Config $Config
+            if ($lcuVer) { $lcuVersions[$lcuPath] = $lcuVer }
+        }
+        if ($lcuVersions.Count -eq 0 -and @($candidates).Count -gt 1) {
+            Write-WinMediaLog -Config $Config -Level Warning -Message 'LCU 候選都讀不到版本，本次改用 KB 編號排序判定目標。'
+        }
+        Resolve-WinMediaCumulativeSet -Paths @($candidates) -Config $Config -Versions $lcuVersions
+    }
     if (-not $cumulative) { throw '缺少最新 LCU（PackageDir 內沒有 .msu 累積更新）。' }
     if ($downloaded.Count -eq 0 -and @($cumulative.Checkpoints).Count -gt 0) {
         Write-WinMediaLog -Config $Config -Level Warning -Message ('PackageDir 內有較舊的累積更新，將視為前置 checkpoint：' + (($cumulative.Checkpoints | ForEach-Object { Split-Path -Path $_ -Leaf }) -join ', ') + '。建議只保留目標與其 checkpoint。')
@@ -335,22 +349,52 @@
         Write-WinMediaLog -Config $Config -Level Warning -Message '未偵測到目標 LCU 的 checkpoint；boot 步驟的 LCU 可能無效，並會在 install 索引全部完成後才中止；使用 Download.KB 時也會出現，請確認目標 MSU 所在資料夾已有 checkpoint。'
     }
     if ($categories.Unclassified.Count -gt 0) {
-        Write-WinMediaLog -Config $Config -Level Warning -Message ('無法分類、略過的套件：' + (($categories.Unclassified | ForEach-Object { Split-Path -Path $_ -Leaf }) -join ', '))
+        Write-WinMediaLog -Config $Config -Level Warning -Message ('非更新套件（convert-UUP 同樣不整合），略過：' + (($categories.Unclassified | ForEach-Object { Split-Path -Path $_ -Leaf }) -join ', '))
     }
     if (@($categories.DotNetCU).Count -gt 1) {
-        Write-WinMediaLog -Config $Config -Level Warning -Message '偵測到多個 .NET CU，僅使用排序第一者；建議只保留所需的一包。（SSU 依目標檔名選取，不受影響）'
+        Write-WinMediaLog -Config $Config -Level Warning -Message '偵測到多個 .NET CU，僅使用排序第一者；建議只保留所需的一包。'
     }
-    # SSU 取自目標 CU 的展開目錄（CombinedCU 內的 SSU-*.cab）；checkpoint 內的 SSU 較舊，不可用於 WinRE 與主映像
+    # Build 路徑：SSU 取自目標 CU 的展開目錄（CombinedCU 內的 SSU-*.cab）；手動路徑依版本保留最新，目標 CU 內的 SSU 排在前面
     $targetName = Split-Path -Path $cumulative.Target -Leaf
     $escapedTarget = [System.Management.Automation.WildcardPattern]::Escape($targetName)
-    $ssu = @($categories.SSU | Where-Object { $_ -like "*\$escapedTarget\*" }) | Select-Object -First 1
-    if (-not $ssu) {
-        if ($buildSet) { throw '目標累積更新內找不到 SSU（Build 路徑不回退至 PackageDir 內的舊 SSU）。' }
-        $ssu = $categories.SSU | Select-Object -First 1
-        Write-WinMediaLog -Config $Config -Level Warning -Message '目標累積更新內找不到 SSU，改用 PackageDir 內第一個 SSU。'
+    $targetSsu = @($categories.SSU | Where-Object { $_ -like "*\$escapedTarget\*" })
+    if ($buildSet) {
+        if ($targetSsu.Count -eq 0) { throw '目標累積更新內找不到 SSU（Build 路徑不回退至 PackageDir 內的舊 SSU）。' }
+        $ssu = $targetSsu | Select-Object -First 1
+    }
+    else {
+        # 手動路徑：所有 SSU 候選比對 identity 版本，保留最新（convert-UUP :chkssu）；任一 SSU 讀不到版本時，改用目標 CU 內的 SSU 優先
+        $ssuVersions = @{}
+        foreach ($ssuPath in @($categories.SSU)) {
+            $ssuVer = Get-WinMediaPackageVersion -Package $ssuPath -ExpandDir $expandDir -Kind ServicingStack -Config $Config
+            if ($ssuVer) { $ssuVersions[$ssuPath] = $ssuVer }
+        }
+        # 目標 CU 內的 SSU 排在前面，版本相同時優先採用目標 CU 的 SSU
+        $ssuOrder = @(@($targetSsu) + @($categories.SSU | Where-Object { $targetSsu -notcontains $_ }))
+        $ssu = Select-WinMediaNewestPackage -Paths $ssuOrder -Versions $ssuVersions
+        if ($ssuVersions.Count -lt @($categories.SSU).Count) {
+            Write-WinMediaLog -Config $Config -Level Warning -Message 'SSU 有無法讀取版本者，本次改用目標 CU 內的 SSU（或排序第一者）。'
+        }
+        if (@($categories.SSU).Count -gt 1) {
+            $ssuShownVer = if ($ssuVersions.ContainsKey($ssu)) { $ssuVersions[$ssu] } else { '未知' }
+            Write-WinMediaLog -Config $Config -Level Info -Message "SSU 依版本保留最新：$(Split-Path -Path $ssu -Leaf)（版本 $ssuShownVer）。"
+        }
+        if ($targetSsu.Count -eq 0) {
+            Write-WinMediaLog -Config $Config -Level Warning -Message '目標累積更新內找不到 SSU，改從 PackageDir 內的 SSU 選取。'
+        }
     }
     $lcuStage = New-WinMediaUpdateStage -Target $cumulative.Target -Checkpoints @($cumulative.Checkpoints) -StageDir $stageDir -Config $Config
     $dotNet = $categories.DotNetCU | Select-Object -First 1
+    # 啟用套件（eKB）：每個 eKB 的 Edition 清單只算一次，各索引再依映像判定是否套用
+    $enablement = @($categories.Enablement | ForEach-Object {
+            $editions = @(Get-WinMediaEnablementEdition -Package $_ -ExpandDir $expandDir)
+            if ($editions.Count -eq 0) {
+                Write-WinMediaLog -Config $Config -Level Warning -Message "啟用套件無法讀取 Edition，略過：$(Split-Path -Path $_ -Leaf)"
+            }
+            else {
+                [pscustomobject]@{ Path = $_; Editions = $editions }
+            }
+        } | Where-Object { $_ })
     $safeOs = $categories.SafeOS | Select-Object -First 1
     $setupDu = $categories.SetupDU | Select-Object -First 1
     if (-not $safeOs) {
@@ -415,7 +459,7 @@
         $parallelConfig = @{}
         foreach ($k in $Config.Keys) { $parallelConfig[$k] = $Config[$k] }
         $parallelConfig['MountDir'] = $mountDir
-        $baseJob = @{ mountSwitches = $mountSwitches; Config = $parallelConfig; ssu = $ssu; lcuStage = $lcuStage; langFod = $langFod; dotNet = $dotNet; appxList = $appxList; storeSet = $storeSet; lxpItems = $lxpItems; driverSet = $driverSet; forceUnsigned = $forceUnsigned; resetBaseOS = $resetBaseOS; common = $common; winreWim = $winreWim }
+        $baseJob = @{ mountSwitches = $mountSwitches; Config = $parallelConfig; ssu = $ssu; lcuStage = $lcuStage; langFod = $langFod; dotNet = $dotNet; enablement = $enablement; appxList = $appxList; storeSet = $storeSet; lxpItems = $lxpItems; driverSet = $driverSet; forceUnsigned = $forceUnsigned; resetBaseOS = $resetBaseOS; common = $common; winreWim = $winreWim }
         $parallelDir = Join-Path -Path $workDir -ChildPath 'parallel'
         # 登記前先守衛：來源或成品位於平行目錄之內時，登記的清空會刪除它們（與 L196、L202 同理）
         if (Test-PathWithin -Child $SourceIso -Parent $parallelDir) { throw "來源映像位於平行工作目錄之內，會被清空：$SourceIso" }
@@ -434,7 +478,7 @@
     foreach ($index in $targets) {
         Mount-WinMediaImage -ImagePath $installWim -Index $index -MountPath (Join-Path -Path $mountDir -ChildPath ('install-{0}' -f $index)) @mountSwitches -Config $Config -Action {
             param($mounted)
-        Invoke-WinMediaInstallIndexUpdate -mounted $mounted -ssu $ssu -lcuStage $lcuStage -langFod $langFod -dotNet $dotNet -appxList $appxList -storeSet $storeSet -lxpItems $lxpItems -driverSet $driverSet -forceUnsigned $forceUnsigned -resetBaseOS $resetBaseOS -common $common -IsFirstTarget:($index -eq $targets[0]) -sourcesDir $sourcesDir -winreWim $winreWim -isEsdSource:$isEsdSource -mediaDir $mediaDir -Config $Config -installKernel $installKernel -buildInfo $buildInfo -bootEx $bootEx
+        Invoke-WinMediaInstallIndexUpdate -mounted $mounted -ssu $ssu -lcuStage $lcuStage -langFod $langFod -dotNet $dotNet -enablement $enablement -appxList $appxList -storeSet $storeSet -lxpItems $lxpItems -driverSet $driverSet -forceUnsigned $forceUnsigned -resetBaseOS $resetBaseOS -common $common -IsFirstTarget:($index -eq $targets[0]) -sourcesDir $sourcesDir -winreWim $winreWim -isEsdSource:$isEsdSource -mediaDir $mediaDir -Config $Config -installKernel $installKernel -buildInfo $buildInfo -bootEx $bootEx
         } | Out-Null
     }
     }

@@ -118,7 +118,7 @@ Describe 'Parallel install: behaviour' {
             param([int[]]$Targets = @(2, 3), [bool]$IsEsd = $false, [hashtable]$Cfg, [hashtable]$Kernel, [hashtable]$Build, [hashtable]$Boot, [string]$Root, [string]$MountOverride = '')
             Assert-InstallMocksLive
             $bj = @{
-                mountSwitches = @{}; ssu = 'ssu.msu'; lcuStage = 'stage'; langFod = $null; dotNet = $null; appxList = $null
+                mountSwitches = @{}; ssu = 'ssu.msu'; lcuStage = 'stage'; langFod = $null; dotNet = $null; enablement = @(); appxList = $null
                 storeSet = $null; lxpItems = $null; driverSet = $null; forceUnsigned = $false; resetBaseOS = $false
                 common = @{}; winreWim = 'winre.wim'; Config = $Cfg
             }

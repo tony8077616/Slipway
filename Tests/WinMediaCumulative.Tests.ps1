@@ -106,6 +106,22 @@ Describe '累積更新集合（Resolve-WinMediaCumulativeSet）' -Tag 'Unit' {
     It '多個累積更新但檔名缺 KB 時中止（不猜測順序）' {
         { Resolve-WinMediaCumulativeSet -Paths @('C:\x\a.msu', 'C:\x\b.msu') -Config $script:config } | Should -Throw '*checkpoint*'
     }
+
+    It '提供版本時目標為版本最高者，即使 KB 編號較小（convert-UUP chklcu 以版本取目標）' {
+        $older = Join-Path -Path $TestDrive -ChildPath 'Windows11.0-KB5999999-x64.msu'
+        $newer = Join-Path -Path $TestDrive -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        $versions = @{}
+        $versions[$older] = [version]'26100.9000.1.1'
+        $versions[$newer] = [version]'26100.9818.1.42'
+        $set = Resolve-WinMediaCumulativeSet -Paths @($older, $newer) -Versions $versions -Config $script:config
+        $set.Target | Should -Be $newer
+        @($set.Checkpoints) | Should -Be @($older)
+    }
+
+    It '沒有版本時維持原本的 KB 編號排序' {
+        $set = Resolve-WinMediaCumulativeSet -Paths @('C:\x\Windows11.0-KB5043080-x64.msu', 'C:\x\Windows11.0-KB5127936-x64.msu') -Config $script:config
+        $set.Target | Should -BeLike '*KB5127936*'
+    }
 }
 
 Describe '暫存資料夾（New-WinMediaUpdateStage）' -Tag 'Unit' {
