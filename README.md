@@ -103,15 +103,26 @@
 | `AdkRoot` | ADK 預設安裝路徑 | `DismProvider = 'ADK'` 或需要 oscdimg 時使用；缺少時自動安裝 Deployment Tools |
 | `DismProvider` | `Inbox` | `Inbox` 或 `ADK` |
 | `OutputFormat` | `WIM` | `WIM` 或 `ESD` |
-| `WinPEUpdate` | `SafeOS` | WinPE 核心更新路線：`SafeOS`（套用 SafeOS DU，已驗證）或 `Lcu`（convert-UUP 路線：WinRE 套 SSU＋SafeOS DU，boot.wim 另以原始 MSU 加入最新 LCU；e2e 實測 KB5127648 判定 Not applicable，無效果，不建議使用） |
+| `WinPEUpdate` | `Lcu` | WinPE 核心更新路線（預設）：`Lcu`＝WinRE 套 SSU＋SafeOS DU，boot.wim 以目標 MSU 檔案路徑直接加入最新 LCU。**需求**：`PackageDir` 必須與目標 LCU 的 checkpoint 位於同一資料夾；缺少 checkpoint 時 Add 可能靜默失敗（實測 `full2\packages` 只放目標 MSU 時，PE 仍為 9817）。加入後 ntoskrnl 未變且未達安裝映像版本時中止。步驟 4 若未偵測到目標 LCU 的 checkpoint 會先寫入警告（使用 `Download.KB` 時也會出現，請確認目標 MSU 所在資料夾已有 checkpoint）。`SafeOS`＝只套用 SafeOS DU（舊預設；boot.wim 核心停在 SafeOS DU 的版本，full3 實測為 9817，可能低於安裝映像）。實測：以 UUP 原資料夾（含 KB5043080 checkpoint）建置，boot 索引 1、2 為 UBR 0x265a、ntoskrnl 9818（full4，2026-11-13） |
 | `UpdateBootFiles` | `$true` | 選項 B：改用安裝映像內已套用 LCU 的 `_EX` 開機檔（bootx64、bootmgr、efisys、memtest、boot.stl、fonts、cipolicies）。**風險**：這些是 UEFI CA 2023 開機檔，韌體 db 沒有 2023 CA 的機器開啟 Secure Boot 可能無法開機 |
 | `ResetBase` | `$false` | 只作用於 WinRE 的 cleanup；啟用後無法解除安裝更新 |
 | `ResetBaseOS` | `$false` | 作用於 install.wim 各目標索引的 cleanup（`-ResetBase`）；啟用後無法解除安裝更新。必須是布林，字串（例如 `'false'`）會中止。boot.wim 不受影響 |
+| `OutputForm` | 空白 | 輸出形式：空白 = 自動（一般來源輸出 ISO；`.esd` 來源改用 Image 並警告）；明確指定 `Iso`、`Folder` 或 `Image`。`.esd` 來源只允許 `Image`，指定 `Iso` 或 `Folder` 會中止 |
+| `ScratchDirectory` | 空白 | DISM 暫存目錄（`-ScratchDirectory`）；空白 = 不傳。須為本機路徑，且不得位於 MountDir 或 `WorkDir\media` 之內；不存在時由工具建立 |
+| `MountOptimize` | `$false` | 掛載可寫映像時加 `-Optimize`（唯讀掛載與 Remount 不帶）。必須是布林 |
+| `MountCheckIntegrity` | `$false` | 掛載可寫映像時加 `-CheckIntegrity`（唯讀掛載與 Remount 不帶）。必須是布林 |
+| `MountParallelCount` | `1` | 同時掛載的 index 數。`1` = 現行的單一程序流程（不變）；大於 1 時改為平行：每個 index 匯出成單一索引 WIM 後由獨立的 Windows PowerShell 程序處理，最後合併。實際數量 = min(此值, 選取的 index 數)。未在實機上驗證 |
+| `MountSpaceEstimateGB` | `30` | 每個掛載需要的估計空間（GB），平行路徑依磁碟區加總。只警告、不拒絕；數字未實測，也不含更新檔解壓縮所需的空間 |
+| `OptimizationTarget` | 空白 | `Optimize-WindowsImage` 的 `-OptimizationTarget`，原樣傳給 DISM、不做值的驗證；空白 = 不執行。文件只列出 WIMBoot，且僅適用於 WIMBoot 映像 |
 | `Languages` | `@('ja-JP')` | 要保留的語言（語言包與 FoD 依此過濾） |
 | `Indexes` | `@()` | 要更新的 install.wim 索引；空陣列 = 全部 |
 | `VirtualEditions` | `@()` | 要建立的虛擬版本（例如 `@('IoTEnterpriseS')`）；建立時來源為 EnterpriseS 索引 |
 | `DeleteSourceEdition` | `$false` | 建立虛擬版本後是否刪除 EnterpriseS |
 | `DefenderExclusions` | `$false` | 執行期間把 WorkDir、MountDir、OutputDir 加入 Windows Defender 排除，結束時只還原本次新增的項目；需系統管理員權限 |
+| `LogLevel` | `Info` | 工具日誌的等級：`Error`、`Warning`、`Info`、`Verbose`、`Debug` |
+| `DismLogLevel` | `WarningsInfo` | DISM cmdlet 的 `-LogLevel`，名稱而非數字：`Errors`、`Warnings`、`WarningsInfo`、`Debug` |
+| `DismUseWindowsPowerShell` | `$true` | 在 pwsh 7 執行時，以 `Import-Module -UseWindowsPowerShell` 相容模式匯入 DISM；`$false` = 開工前中止並提示改用 Windows PowerShell 5.1。Windows PowerShell 5.1 忽略此項 |
+| `DebugTrace` | `0` | 除錯追蹤等級 0–3，各等級的細節見 `Config\Default.psd1` 的註解 |
 | `Lang.Path` | 空白 | 語言包資料夾（遞迴，只取 `.cab`）；空白 = 執行腳本所在目錄\`Lang`（不存在則停用） |
 | `Fod.Path` | 空白 | FoD 資料夾（遞迴，只取 `.cab`）；空白 = 執行腳本所在目錄\`Fod`（不存在則停用） |
 | `StoreApps.Path` | 空白 | StoreApps 資料夾；空白 = 執行腳本所在目錄\`StoreApps`（不存在則停用），每個套件須通過 Microsoft 簽章驗證 |
@@ -199,7 +210,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Invoke-Validatio
 - **方向與 Microsoft 文件相反（依 convert-UUP，採用）**：文件第 27 列是 WinPE → 媒體；本工具改為媒體 → WinPE 索引 2，在 LCU、cleanup、驅動之後以 `Config\bootwim.txt`、`Config\bootmui.txt`（來源 `uup-converter-wimlib\bin\`）覆蓋 WinPE 同名檔，並加入根目錄 `setup.exe` 與 `sources\inf\setup.cfg`。實測：參考 ISO 的 bootwim 清單 100 項媒體與 WinPE 完全相同；改採此方向前的輸出有 88 項不同，且全部是媒體版本較新的檔。
 - **寫入方式（實機修正）**：WinPE 同步不掛載索引 2，改用 `wimlib-imagex update <boot.wim> 2`，指令經標準輸入傳入（wimlib 只接受一次 `--command`）。原因：掛載後映像內的 `sources\alert.gif` 只給 Administrators 讀取（擁有者 TrustedInstaller），`Copy-Item` 會被拒絕；`add` 會覆寫既有檔案（已用小型 WIM 實驗確認）。同步在兩個索引卸載之後、export／optimize 之前執行。
 - **已實作（待實機雜湊驗證）**：文件第 28 列的 boot manager（`bootmgfw.efi`、`bootmgr.efi`、`boot.stl`）在索引 2 掛載中自 WinPE 覆蓋到媒體（`UpdateBootFiles` 套用 `_EX` 時略過）。
-- **Enablement（待實測）**：Enablement 套件 KB5121794（10.0.26100.9544）未套用；原版 install.wim 索引 1 已內含同一套件 10.0.26100.8966（wimlib 列出 `Windows\servicing\Packages`），成品是否需要 9544 尚未驗證。
+- **Enablement（依 convert-UUP 條件套用，full7 已實測）**：安裝前依映像 Edition 套件判定，Edition 命中且非 LTSC 時安裝 KB5121794（10.0.26100.9544），LTSC 略過；失敗中止（同 convert-UUP `:errmount`）。實際效果見 DESIGN.md 2026-11-14 列。
 - **尚未驗證**：多索引輸出（索引 2–5 未更新，成品不可直接部署）、輸出 ISO 的開機測試（VM）、ARM64 開機參數、ADK oscdimg 路徑、`Get-WindowsEdition -Target` 屬性名稱與 wimlib ESD 轉換。`DESIGN.md` 的「未決問題」列出待確認項目。
 
 ## 授權

@@ -4,6 +4,7 @@ BeforeAll {
     Import-Module -Name (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'WinMediaRefresh.psd1') -Force
     $script:mainPath = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WindowsMediaRefresh.ps1'
     $script:ast = [System.Management.Automation.Language.Parser]::ParseFile($script:mainPath, [ref]$null, [ref]$null)
+    $script:fnAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'Public\Invoke-WinMediaInstallIndexImageUpdate.ps1'), [ref]$null, [ref]$null)
 }
 
 Describe 'Resolve-WinMediaResetBaseOS（ResetBaseOS 必須為布林）' -Tag 'Unit' {
@@ -34,7 +35,7 @@ Describe 'ResetBaseOS 接線（AST）' -Tag 'Unit' {
     }
 
     It 'install.wim 的 cleanup（Repair-WindowsImage）以 -ResetBase:$resetBaseOS 傳入' {
-        $repairs = @($script:ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Repair-WindowsImage' }, $true))
+        $repairs = @(@($script:ast, $script:fnAst) | ForEach-Object { $_.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Repair-WindowsImage' }, $true) })
         $wired = @($repairs | Where-Object {
             $p = @($_.CommandElements | Where-Object { $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $_.ParameterName -eq 'ResetBase' })
             $p.Count -eq 1 -and $p[0].Argument -is [System.Management.Automation.Language.VariableExpressionAst] -and $p[0].Argument.VariablePath.UserPath -eq 'resetBaseOS'

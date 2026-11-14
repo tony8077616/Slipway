@@ -6,6 +6,334 @@ $ErrorActionPreference = 'Stop'
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\PathSanitize.psm1') -Force
 Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\PSModules\Common\WinMediaOperation.psm1') -Force
 
+function ConvertTo-WinMediaArgumentValue {
+    # 含空白的引數值加上雙引號，供 Start-Process -ArgumentList 使用
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    if ($Value -match '\s') { return '"' + $Value + '"' }
+    return $Value
+}
+
+function Get-WinMediaRelaunchArgument {
+    # 提權重新啟動的引數：由已綁定的參數重建；路徑轉為絕對路徑，switch 以 -Name:$true 傳遞，固定帶 -NoProfile 與 -ExecutionPolicy Bypass（僅作用於新程序）
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [Parameter(Mandatory)][hashtable]$Bound,
+        [string[]]$PathKeys = @()
+    )
+
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-File', (ConvertTo-WinMediaArgumentValue -Value (Get-WinMediaFullPath -Path $ScriptPath)))
+    foreach ($key in $Bound.Keys) {
+        $value = $Bound[$key]
+        if ($value -is [System.Management.Automation.SwitchParameter] -or $value -is [bool]) {
+            if ([bool]$value) { $arguments += ('-{0}:$true' -f $key) }
+            continue
+        }
+        if ($PathKeys -contains $key) {
+            $value = Get-WinMediaFullPath -Path ([string]$value)
+        }
+        $arguments += ('-{0}' -f $key)
+        $arguments += ConvertTo-WinMediaArgumentValue -Value ([string]$value)
+    }
+    return [string[]]$arguments
+}
+
+function Resolve-WinMediaMountOption {
+    # 補上 Step 8 新鍵的預設值（舊設定檔與測試組的設定可能沒有這些鍵），並驗證數值與輸出形式
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([Parameter(Mandatory)][hashtable]$Config)
+
+    $defaults = @{
+        OutputForm           = ''
+        ScratchDirectory     = ''
+        MountOptimize        = $false
+        MountCheckIntegrity  = $false
+        MountParallelCount   = 1
+        MountSpaceEstimateGB = 30
+        OptimizationTarget   = ''
+    }
+    foreach ($key in $defaults.Keys) {
+        if (-not $Config.ContainsKey($key)) { $Config[$key] = $defaults[$key] }
+    }
+    if ($Config.OutputForm -notin '', 'Iso', 'Folder', 'Image') {
+        throw "OutputForm 只允許 Iso、Folder、Image（或空白＝自動），目前為：'$($Config.OutputForm)'。"
+    }
+    # 字串 'false' 為真值，會靜默開啟 DISM 選項，因此非布林一律拒絕（與 ForceUnsigned、ResetBaseOS 相同規則）
+    foreach ($key in 'MountOptimize', 'MountCheckIntegrity') {
+        if ($Config[$key] -isnot [bool]) { throw "$key 必須為 `$true 或 `$false，目前為：'$($Config[$key])'。" }
+    }
+    if (-not ($Config.MountParallelCount -is [int]) -or $Config.MountParallelCount -lt 1) {
+        throw "MountParallelCount 必須為 1 以上的整數，目前為：'$($Config.MountParallelCount)'。"
+    }
+    if (-not ($Config.MountSpaceEstimateGB -is [int] -or $Config.MountSpaceEstimateGB -is [double]) -or $Config.MountSpaceEstimateGB -le 0) {
+        throw "MountSpaceEstimateGB 必須為大於 0 的數字，目前為：'$($Config.MountSpaceEstimateGB)'。"
+    }
+    return $Config
+}
+
+function Resolve-WinMediaOutputPlan {
+    # 輸出形式矩陣（藍圖 F7）：空白的 OutputForm 一律為 Iso；只有 Iso 需要 oscdimg，只有 ESD 壓縮需要 wimlib
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$OutputFormat,
+        [AllowEmptyString()][string]$OutputForm = '',
+        [ValidateSet('Iso', 'Esd')][string]$SourceKind = 'Iso'
+    )
+
+    if ($OutputFormat -notin 'WIM', 'ESD') { throw "不支援的 OutputFormat：$OutputFormat" }
+    $form = if ([string]::IsNullOrWhiteSpace($OutputForm)) { 'Iso' } else { $OutputForm }
+    $autoImage = $false
+    # .esd 來源沒有開機檔與媒體樹：未指定時自動改用 Image（並警告）；明確指定 Iso 或 Folder 直接拒絕，不做任何檔案動作（藍圖 2(a)）
+    if ($SourceKind -eq 'Esd') {
+        if ([string]::IsNullOrWhiteSpace($OutputForm)) { $form = 'Image'; $autoImage = $true }
+        elseif ($OutputForm -in 'Iso', 'Folder') { throw "來源為 .esd 時只允許 OutputForm=Image（Iso 與 Folder 需要開機檔，.esd 來源沒有）：$OutputForm" }
+    }
+    return [pscustomobject]@{
+        OutputForm   = $form
+        NeedsOscdimg = ($form -eq 'Iso')
+        NeedsWimlib  = ($OutputFormat -eq 'ESD' -or $SourceKind -eq 'Esd')
+        AutoImage    = $autoImage
+    }
+}
+
+function Get-WinMediaMountSwitch {
+    # 可寫掛載要帶的開關（Mount-WinMediaImage 的 Mount 參數集）：只在設定為 $true 時加鍵；Remount 參數集不接受這些開關
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param([Parameter(Mandatory)][hashtable]$Config)
+
+    $switches = @{}
+    if ($Config.MountOptimize) { $switches.Optimize = $true }
+    if ($Config.MountCheckIntegrity) { $switches.CheckIntegrity = $true }
+    return $switches
+}
+
+function Resolve-WinMediaScriptDefault {
+    # 腳本預設路徑（Update-WindowsMedia.ps1 與 Clear-WindowsMediaWorkspace.ps1 共用）：參數 → 設定檔 → 腳本所在磁碟根目錄下的子資料夾
+    # 兩支腳本必須算出相同路徑，因為 Defender 狀態檔的名稱是 WorkDir 的雜湊（Resolve-WinMediaDefenderStatePath）
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyString()][string]$Value,
+        [AllowEmptyString()][string]$ConfigValue,
+        [Parameter(Mandatory)][string]$RootDir,
+        [Parameter(Mandatory)][string]$ChildName
+    )
+
+    if ($Value) { return $Value }
+    if ($ConfigValue) { return $ConfigValue }
+    return (Join-Path -Path ([System.IO.Path]::GetPathRoot($RootDir)) -ChildPath $ChildName)
+}
+
+function Copy-WinMediaEsdSource {
+    # .esd 來源先複製進 WorkDir（media\sources\install.esd）再轉換；使用者的原始檔不被移動、不被轉換（藍圖 2(c)）
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'SourcePath', Justification = '由 Invoke-WinMediaOperation 的 scriptblock 閉包使用，PSSA 無法追蹤')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [Parameter(Mandatory)][string]$WimPath,
+        [Parameter(Mandatory)][string]$WorkDir,
+        [Parameter(Mandatory)][hashtable]$Config
+    )
+
+    foreach ($path in $DestinationPath, $WimPath) {
+        if (-not (Test-PathWithin -Child $path -Parent $WorkDir)) { throw "ESD 副本與 install.wim 必須位於 WorkDir 內：$path" }
+    }
+    $dir = Split-Path -Parent $DestinationPath
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Invoke-WinMediaOperation -Category File -Operation 'CopyEsdSource' -Target $DestinationPath -Config $Config -ScriptBlock {
+        Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+    } | Out-Null
+    # 來源常為唯讀（例如從 DVD 或 ISO 取得）；副本需可寫，轉換後才能移除
+    (Get-Item -LiteralPath $DestinationPath).IsReadOnly = $false
+}
+
+function Get-WinMediaFullPath {
+    # 正規化路徑：去除 PowerShell 提供者前綴，依 PowerShell 位置展開相對路徑
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+
+    $plain = $Path -replace '^Microsoft\.PowerShell\.Core\\FileSystem::', ''
+    try {
+        return [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($plain))
+    }
+    catch {
+        # 磁碟機代號不存在時 PowerShell 會丟出 DriveNotFound；改以 .NET 直接展開，讓上層仍能給出中文訊息
+        return [System.IO.Path]::GetFullPath($plain)
+    }
+}
+
+function Get-WinMediaDriveInfo {
+    # DriveInfo 的唯一入口，便於測試以 mock 模擬磁碟機類型（例如網路磁碟機）；不接受 UNC
+    [CmdletBinding()]
+    [OutputType([System.IO.DriveInfo])]
+    param([Parameter(Mandatory)][string]$Root)
+
+    return [System.IO.DriveInfo]::new($Root)
+}
+
+function Test-WinMediaNetworkPath {
+    # 網路路徑判斷：UNC（含 \\?\UNC\）或對應到網路磁碟機的磁碟區；本機的 \\?\C:\ 形式視為本機
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $full = Get-WinMediaFullPath -Path $Path
+    if ($full.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if ($full.StartsWith('\\?\', [System.StringComparison]::Ordinal)) { $full = $full.Substring(4) }
+    if ($full.StartsWith('\\', [System.StringComparison]::Ordinal)) { return $true }
+    $root = [System.IO.Path]::GetPathRoot($full)
+    if ($root -notmatch '^[A-Za-z]:\\$') { return $false }
+    try {
+        return (Get-WinMediaDriveInfo -Root $root).DriveType -eq [System.IO.DriveType]::Network
+    }
+    catch {
+        return $false
+    }
+}
+
+function Assert-WinMediaLocalPath {
+    # 拒絕網路路徑（需求第 6、10 項）；僅在 Slipway 執行，Keel 不做此檢查
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Path,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if (Test-WinMediaNetworkPath -Path $Path) {
+        throw "$Name 不支援網路路徑：$Path。請改用本機磁碟，並以 -WorkDir 與 -OutputDir 指定本機資料夾。"
+    }
+}
+
+function Get-WinMediaGoogleDriveRootFromState {
+    # 解析 PerAccountPreferences 的 JSON 文字：mount_point_path 為單一磁碟機字母，轉為 X:\；格式不符的項目略過，不外拋
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text)
+
+    try {
+        $state = $Text | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Verbose "Google Drive 狀態 JSON 無法解析：$($_.Exception.Message)"
+        return @()
+    }
+    if ($null -eq $state) { return @() }
+    $prefs = $state.PSObject.Properties['per_account_preferences']
+    if ($null -eq $prefs) { return @() }
+    foreach ($entry in @($prefs.Value)) {
+        try {
+            $mount = $entry.PSObject.Properties['value'].Value.PSObject.Properties['mount_point_path'].Value
+        }
+        catch { continue }
+        if ($mount -is [string] -and $mount -match '^([A-Za-z]):?\\?$') { '{0}:\' -f $Matches[1].ToUpperInvariant() }
+    }
+}
+
+function Get-WinMediaGoogleDriveMountRoot {
+    # Google Drive 桌面版的掛載根（HKCU:\Software\Google\DriveFS 的 PerAccountPreferences，唯讀）；讀取失敗回傳空陣列，不中止執行
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+
+    try {
+        $text = [string](Get-ItemProperty -LiteralPath 'HKCU:\Software\Google\DriveFS' -Name 'PerAccountPreferences' -ErrorAction Stop).PerAccountPreferences
+    }
+    catch {
+        Write-Verbose "讀取 Google Drive 登錄檔失敗：$($_.Exception.Message)"
+        return @()
+    }
+    return @(Get-WinMediaGoogleDriveRootFromState -Text $text)
+}
+
+function Get-WinMediaCloudProvider {
+    # 雲端同步資料夾的供應商：OneDrive 以環境變數判斷；Google Drive 以登錄檔的掛載根判斷（唯讀，讀不到即視為非 Google Drive）
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Path)
+
+    $table = @(
+        @{ Name = 'OneDrive'; EnvVars = @('OneDrive', 'OneDriveConsumer', 'OneDriveCommercial') }
+    )
+    $full = (Get-WinMediaFullPath -Path $Path).TrimEnd('\') + '\'
+    foreach ($provider in $table) {
+        foreach ($var in $provider.EnvVars) {
+            $root = [Environment]::GetEnvironmentVariable($var)
+            if ([string]::IsNullOrWhiteSpace($root)) { continue }
+            $rootWithSep = (Get-WinMediaFullPath -Path $root).TrimEnd('\') + '\'
+            if ($full.StartsWith($rootWithSep, [System.StringComparison]::OrdinalIgnoreCase)) { return $provider.Name }
+        }
+    }
+    foreach ($root in @(Get-WinMediaGoogleDriveMountRoot)) {
+        $rootWithSep = $root.TrimEnd('\') + '\'
+        if ($full.StartsWith($rootWithSep, [System.StringComparison]::OrdinalIgnoreCase)) { return 'Google Drive' }
+    }
+    return $null
+}
+
+function Test-WinMediaNtfsVolume {
+    # MountDir 必須位於 NTFS 磁碟區（掛載需要）；UNC 或無法判斷時為 $false
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    return (Get-WinMediaVolumeFileSystem -Path $Path) -eq 'NTFS'
+}
+
+function Test-WinMediaAdministrator {
+    # 目前行程是否具系統管理員權限（獨立成函式以便測試時模擬）
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-WinMediaVolumeFreeSpaceGB {
+    # 路徑所在磁碟區的可用空間（GB）；無法判斷時回傳 $null
+    [CmdletBinding()]
+    [OutputType([double])]
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $drive = Get-WinMediaDriveInfo -Root ([System.IO.Path]::GetPathRoot((Get-WinMediaFullPath -Path $Path)))
+        return [math]::Round($drive.AvailableFreeSpace / 1GB, 2)
+    }
+    catch {
+        return $null
+    }
+}
+
+function Assert-WinMediaScratchPath {
+    # ScratchDirectory 必須是本機路徑，且不得位於 MountDir 或 WorkDir\media 之內（藍圖 2(d)、F12）
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$ScratchDirectory,
+        [Parameter(Mandatory)][string]$MountDir,
+        [Parameter(Mandatory)][string]$WorkDir
+    )
+
+    Assert-WinMediaLocalPath -Path $ScratchDirectory -Name 'ScratchDirectory'
+    $scratch = Get-WinMediaFullPath -Path $ScratchDirectory
+    $mediaDir = [System.IO.Path]::Combine((Get-WinMediaFullPath -Path $WorkDir), 'media')
+    if (Test-PathWithin -Child $scratch -Parent (Get-WinMediaFullPath -Path $MountDir)) {
+        throw "ScratchDirectory 不得位於 MountDir 之內：$ScratchDirectory"
+    }
+    if (Test-PathWithin -Child $scratch -Parent $mediaDir) {
+        throw "ScratchDirectory 不得位於 WorkDir\media 之內：$ScratchDirectory"
+    }
+}
+
 function Test-WinMediaPathOverlap {
     # §3.4：更新原始檔、驅動、LXP、WorkDir 兩兩不得重疊（相等、包含或被包含）
     [CmdletBinding()]
@@ -82,6 +410,8 @@ function Resolve-WinMediaMountDir {
         [string]$MountDir
     )
 
+    # 根目錄相對 WorkDir（如 \w）須先補成完整路徑，否則 GetPathRoot 取得的是 \，預設會落到系統磁碟
+    if ($WorkDir) { $WorkDir = Get-WinMediaFullPath -Path $WorkDir }
     if (-not [string]::IsNullOrWhiteSpace($MountDir)) {
         $resolved = (ConvertTo-SanitizedPath -Path $MountDir).Path.TrimEnd('\')
     }
@@ -103,7 +433,7 @@ function Resolve-WinMediaMountDir {
     if ($resolved -match '^[A-Za-z]:$') {
         throw "掛載目錄不可為磁碟根目錄：$resolved"
     }
-    return $resolved
+    return (Get-WinMediaFullPath -Path $resolved)
 }
 
 function Use-WinMediaWorkDir {
@@ -206,7 +536,7 @@ function Get-WinMediaVolumeFileSystem {
     [OutputType([string])]
     param([Parameter(Mandatory)][string]$Path)
 
-    try { return ([System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($Path))).DriveFormat } catch { return $null }
+    try { return (Get-WinMediaDriveInfo -Root ([System.IO.Path]::GetPathRoot($Path))).DriveFormat } catch { return $null }
 }
 
 function Test-WinMediaWorkRootAclTrusted {
@@ -386,4 +716,4 @@ function Mount-WinMediaSourceIso {
     return [pscustomobject]@{ DriveLetter = ($image | Get-Volume).DriveLetter; Mounted = $mounted }
 }
 
-Export-ModuleMember -Function Test-WinMediaPathOverlap, Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir
+Export-ModuleMember -Function ConvertTo-WinMediaArgumentValue, Get-WinMediaRelaunchArgument, Resolve-WinMediaMountOption, Get-WinMediaFullPath, Test-WinMediaNetworkPath, Assert-WinMediaLocalPath, Get-WinMediaCloudProvider, Resolve-WinMediaOutputPlan, Get-WinMediaMountSwitch, Resolve-WinMediaScriptDefault, Copy-WinMediaEsdSource, Test-WinMediaNtfsVolume, Test-WinMediaAdministrator, Get-WinMediaVolumeFileSystem, Get-WinMediaVolumeFreeSpaceGB, Get-WinMediaDriveInfo, Assert-WinMediaScratchPath, Test-WinMediaPathOverlap,Resolve-WinMediaInputPath, Resolve-WinMediaMountDir, Use-WinMediaWorkDir, Remove-WinMediaWorkDir, Initialize-WinMediaWorkRoot, Get-WinMediaWorkDirSecurity, Resolve-WinMediaDefenderStatePath, Assert-WinMediaOutputDir, Resolve-WinMediaLogFile, Resolve-WinMediaLogLocation, Resolve-WinMediaLegacyInputSection, Mount-WinMediaSourceIso, Remove-WinMediaCleanupDir

@@ -89,13 +89,14 @@ function Install-WinMediaStoreApp {
         if (-not (Test-Path -LiteralPath $item -PathType Leaf)) { throw "StoreApps 檔案已不存在，拒絕注入：$item" }
         if ((Get-WinMediaFileSha256 -LiteralPath $item) -ne $expected[$item]) { throw "StoreApps 檔案在驗證之後被變更（SHA-256 不符），拒絕注入：$item" }
     }
+    $common = Get-WinMediaDismCommonParameter -Config $Config
     foreach ($app in @($Set.Apps)) {
         $license = [IO.Path]::ChangeExtension($app, '.xml')
         $licenseArg = if (Test-Path -LiteralPath $license -PathType Leaf) { @{ LicensePath = $license } } else { @{ SkipLicense = $true } }
         $depArg = if (@($Set.Frameworks).Count -gt 0) { @{ DependencyPackagePath = @($Set.Frameworks) } } else { @{} }
         Write-WinMediaLog -Config $Config -Level Info -Message "注入 StoreApps：$(Split-Path -Path $app -Leaf)"
         Invoke-WinMediaDism -Provider $Config.DismProvider -Config $Config -ScriptBlock {
-            Add-AppxProvisionedPackage -Path $MountPath -PackagePath $app @licenseArg @depArg -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
+            Add-AppxProvisionedPackage -Path $MountPath -PackagePath $app @licenseArg @depArg @common -LogLevel $Config.DismLogLevel -ErrorAction Stop | Out-Null
         } | Out-Null
     }
 }
