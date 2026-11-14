@@ -116,3 +116,131 @@ Describe 'Get-WinMediaPackageCategoryByContent（WIM 格式 .msu）' -Tag 'Unit'
         Should -Invoke -CommandName Expand-WinMediaPackageToDir -ModuleName WinMediaPackage -ParameterFilter { $Package -like '*.msu' } -Times 2 -Exactly
     }
 }
+
+Describe 'Get-WinMediaPackageVersion（Rollup／SSU 的 identity 版本）' -Tag 'Unit' {
+    BeforeEach {
+        $script:verRoot = Join-Path -Path $TestDrive -ChildPath ('ver-' + [guid]::NewGuid().ToString('N'))
+        $script:verExpand = Join-Path -Path $script:verRoot -ChildPath 'expand'
+        [IO.Directory]::CreateDirectory($script:verExpand) | Out-Null
+    }
+
+    It 'CombinedCU 內的 SSU：從 nested-<cab> 目錄的 update.mum 讀出 Package_for_ServicingStack 版本' {
+        $msuDir = Join-Path -Path $script:verExpand -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        $nested = Join-Path -Path $msuDir -ChildPath 'nested-SSU-26100.9815-x64.cab'
+        [IO.Directory]::CreateDirectory($nested) | Out-Null
+        [IO.File]::WriteAllText((Join-Path -Path $nested -ChildPath 'update.mum'), '<assembly><assemblyIdentity name="Package_for_ServicingStack_9815" version="26100.9815.1.3" processorArchitecture="amd64" /></assembly>')
+        $pkg = Join-Path -Path $msuDir -ChildPath 'SSU-26100.9815-x64.cab'
+        Get-WinMediaPackageVersion -Package $pkg -ExpandDir $script:verExpand -Kind 'ServicingStack' -Config @{} | Should -Be ([version]'26100.9815.1.3')
+    }
+
+    It 'LCU msu：從 ExpandDir 下同名目錄的 update.mum 讀出 Package_for_RollupFix 版本' {
+        $msu = Join-Path -Path $script:verRoot -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        $leafDir = Join-Path -Path $script:verExpand -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        [IO.Directory]::CreateDirectory($leafDir) | Out-Null
+        [IO.File]::WriteAllText((Join-Path -Path $leafDir -ChildPath 'update.mum'), '<assembly><assemblyIdentity name="Package_for_RollupFix" version="26100.9818.1.42" processorArchitecture="amd64" /></assembly>')
+        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' -Config @{} | Should -Be ([version]'26100.9818.1.42')
+    }
+
+    It 'LCU msu 的 identity 只在內層 .wim：以 wimlib 只抽出 update.mum 後讀版本' {
+        $msu = Join-Path -Path $script:verRoot -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        $leafDir = Join-Path -Path $script:verExpand -ChildPath 'Windows11.0-KB5127936-x64.msu'
+        [IO.Directory]::CreateDirectory($leafDir) | Out-Null
+        [IO.File]::WriteAllText((Join-Path -Path $leafDir -ChildPath 'Windows11.0-KB5127936-x64.wim'), 'stub')
+        Mock -ModuleName WinMediaPackage Invoke-WinMediaWimlib {
+            $dest = ($ArgumentList | Where-Object { $_ -like '--dest-dir=*' }) -replace '^--dest-dir=', ''
+            [IO.File]::WriteAllText((Join-Path -Path $dest -ChildPath 'update.mum'), '<assembly><assemblyIdentity name="Package_for_RollupFix" version="26100.9818.1.42" processorArchitecture="amd64" /></assembly>')
+        }
+        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' -Config @{} | Should -Be ([version]'26100.9818.1.42')
+        Should -Invoke -ModuleName WinMediaPackage -CommandName Invoke-WinMediaWimlib -Times 1 -Exactly
+    }
+
+    It '找不到對應 identity 時回傳 $null' {
+        $msu = Join-Path -Path $script:verRoot -ChildPath 'Windows11.0-KB1111111-x64.msu'
+        Get-WinMediaPackageVersion -Package $msu -ExpandDir $script:verExpand -Kind 'RollupFix' -Config @{} | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Select-WinMediaNewestPackage（同類候選保留最新）' -Tag 'Unit' {
+    It '版本較高的非目標候選勝過目標候選' {
+        $paths = @('C:\pkg\target.msu', 'C:\pkg\other.msu')
+        $versions = @{ 'C:\pkg\target.msu' = [version]'26100.9000.1.1'; 'C:\pkg\other.msu' = [version]'26100.9815.1.3' }
+        Select-WinMediaNewestPackage -Paths $paths -Versions $versions | Should -Be 'C:\pkg\other.msu'
+    }
+
+    It '版本相同時採用排序靠前的目標候選' {
+        $paths = @('C:\pkg\target.msu', 'C:\pkg\other.msu')
+        $versions = @{ 'C:\pkg\target.msu' = [version]'26100.9815.1.3'; 'C:\pkg\other.msu' = [version]'26100.9815.1.3' }
+        Select-WinMediaNewestPackage -Paths $paths -Versions $versions | Should -Be 'C:\pkg\target.msu'
+    }
+
+    It '全部讀不到版本時採用排序第一者' {
+        $paths = @('C:\pkg\target.msu', 'C:\pkg\other.msu')
+        Select-WinMediaNewestPackage -Paths $paths -Versions @{} | Should -Be 'C:\pkg\target.msu'
+    }
+}
+
+Describe 'Get-WinMediaMumXVersion（LCU msu 內的 MumX 容器版本）' -Tag 'Unit' {
+    It '有 MUMX 檔頭且 byte[215] 為 ''1'' 時為 v1' {
+        $path = Join-Path -Path $TestDrive -ChildPath 'mumx-v1.mumx.esd'
+        $bytes = New-Object -TypeName byte[] -ArgumentList 216
+        $bytes[208] = 0x4D; $bytes[209] = 0x55; $bytes[210] = 0x4D; $bytes[211] = 0x58
+        $bytes[215] = 1
+        [IO.File]::WriteAllBytes($path, $bytes)
+        InModuleScope WinMediaPackage -Parameters @{ P = $path } { Get-WinMediaMumXVersion -Path $P } | Should -Be 1
+    }
+
+    It '有 MUMX 檔頭但 byte[215] 不含 ''1'' 時為 v2' {
+        $path = Join-Path -Path $TestDrive -ChildPath 'mumx-v2.mumx.esd'
+        $bytes = New-Object -TypeName byte[] -ArgumentList 216
+        $bytes[208] = 0x4D; $bytes[209] = 0x55; $bytes[210] = 0x4D; $bytes[211] = 0x58
+        $bytes[215] = 50
+        [IO.File]::WriteAllBytes($path, $bytes)
+        InModuleScope WinMediaPackage -Parameters @{ P = $path } { Get-WinMediaMumXVersion -Path $P } | Should -Be 2
+    }
+
+    It '沒有 MUMX 檔頭的 .mumx.??? 檔視為 v1（convert-UUP 2393 的 else 分支）' {
+        $path = Join-Path -Path $TestDrive -ChildPath 'nomagic.mumx.esd'
+        [IO.File]::WriteAllBytes($path, (New-Object -TypeName byte[] -ArgumentList 216))
+        InModuleScope WinMediaPackage -Parameters @{ P = $path } { Get-WinMediaMumXVersion -Path $P } | Should -Be 1
+    }
+
+    It '無後綴的 .mumx 依 byte[7] 判斷：為 1 則 v1，否則 v2（convert-UUP 2397）' {
+        $p1 = Join-Path -Path $TestDrive -ChildPath 'plain1.mumx'
+        $p2 = Join-Path -Path $TestDrive -ChildPath 'plain2.mumx'
+        $b1 = New-Object -TypeName byte[] -ArgumentList 16; $b1[7] = 1
+        $b2 = New-Object -TypeName byte[] -ArgumentList 16; $b2[7] = 0
+        [IO.File]::WriteAllBytes($p1, $b1)
+        [IO.File]::WriteAllBytes($p2, $b2)
+        InModuleScope WinMediaPackage -Parameters @{ P = $p1 } { Get-WinMediaMumXVersion -Path $P } | Should -Be 1
+        InModuleScope WinMediaPackage -Parameters @{ P = $p2 } { Get-WinMediaMumXVersion -Path $P } | Should -Be 2
+    }
+}
+
+Describe 'Get-WinMediaPackageCategoryByContent（Setup DU 的 defender 條件）' -Tag 'Unit' {
+    BeforeEach {
+        $script:setupDuRoot = Join-Path -Path $TestDrive -ChildPath ('setupdu-' + [guid]::NewGuid().ToString('N'))
+        $script:setupDuPkgDir = Join-Path -Path $script:setupDuRoot -ChildPath 'pkg'
+        $script:setupDuExpand = Join-Path -Path $script:setupDuRoot -ChildPath 'expand'
+        [IO.Directory]::CreateDirectory($script:setupDuPkgDir) | Out-Null
+        [IO.Directory]::CreateDirectory($script:setupDuExpand) | Out-Null
+        $script:setupDuMsu = Join-Path -Path $script:setupDuPkgDir -ChildPath 'Windows11.0-KB5127650-x64.msu'
+        [IO.File]::WriteAllBytes($script:setupDuMsu, $script:cabHeader)
+        $script:setupDuTarget = Join-Path -Path $script:setupDuExpand -ChildPath 'Windows11.0-KB5127650-x64.msu'
+        [IO.Directory]::CreateDirectory($script:setupDuTarget) | Out-Null
+        [IO.File]::WriteAllText((Join-Path -Path $script:setupDuTarget -ChildPath 'SetupPlatform.exe'), 'x')
+        [IO.File]::WriteAllText((Join-Path -Path $script:setupDuTarget -ChildPath 'SetupHost.exe'), 'x')
+    }
+
+    It '沒有 update.mum 且沒有 defender xml 的 SetupPlatform／SetupHost 套件判為 SetupDU' {
+        InModuleScope WinMediaPackage -Parameters @{ P = $script:setupDuMsu; E = $script:setupDuExpand; C = $script:config } {
+            Get-WinMediaPackageCategoryByContent -Package $P -ExpandDir $E -Config $C
+        } | Should -Be 'SetupDU'
+    }
+
+    It '同樣的套件若含 defender xml 則不判為 SetupDU' {
+        [IO.File]::WriteAllText((Join-Path -Path $script:setupDuTarget -ChildPath 'MpDefender.xml'), '<x/>')
+        InModuleScope WinMediaPackage -Parameters @{ P = $script:setupDuMsu; E = $script:setupDuExpand; C = $script:config } {
+            Get-WinMediaPackageCategoryByContent -Package $P -ExpandDir $E -Config $C
+        } | Should -Be 'Unknown'
+    }
+}

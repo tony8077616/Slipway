@@ -21,7 +21,7 @@ BeforeAll {
         & (Get-Module -Name WinMediaRefresh) $Script @ArgList
     }
 
-    $script:SharedKeys = @('mountSwitches', 'Config', 'ssu', 'lcuStage', 'langFod', 'dotNet', 'appxList', 'storeSet', 'lxpItems', 'driverSet', 'forceUnsigned', 'resetBaseOS', 'common', 'winreWim')
+    $script:SharedKeys = @('mountSwitches', 'Config', 'ssu', 'lcuStage', 'langFod', 'dotNet', 'enablement', 'appxList', 'storeSet', 'lxpItems', 'driverSet', 'forceUnsigned', 'resetBaseOS', 'common', 'winreWim')
 
     function Get-TestBaseJob {
         param([object]$Scratch = '<absent>', [object]$OperationLog = 'D:\Logs\OperationLog.txt')
@@ -43,6 +43,7 @@ BeforeAll {
             lcuStage      = 'lcu'
             langFod       = [pscustomobject]@{ Items = @() }
             dotNet        = $null
+            enablement    = $null
             appxList      = 'appx'
             storeSet      = [pscustomobject]@{ Items = @() }
             lxpItems      = [object[]]@()
@@ -178,14 +179,14 @@ Describe 'Parallel plan: job' {
         $r[0].IndexDir | Should -Be 'D:\Work\parallel\idx2'
         $r[1].IndexDir | Should -Be 'D:\Work\parallel\idx3'
     }
-    It 'Parallel job has exactly the 18 expected keys' {
+    It 'Parallel job has exactly the 19 expected keys' {
         Assert-PlanFilePresent
         $r = @(Invoke-InModule $script:jobCall @((Get-TestBaseJob), @(2, 3), $script:pRoot))
         $expected = @($script:SharedKeys + @('ImagePath', 'Index', 'MountPath', 'IsFirstTarget')) | Sort-Object
         $r.Count | Should -Be 2
         foreach ($item in $r) {
             $actual = @($item.Job.Keys | ForEach-Object { [string]$_ } | Sort-Object)
-            $actual.Count | Should -Be 18
+            $actual.Count | Should -Be 19
             ($actual -join ',') | Should -Be ($expected -join ',')
         }
     }

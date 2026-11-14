@@ -49,7 +49,7 @@ Describe '主流程接線：Build 路徑' -Tag 'Unit' {
     }
 
     It 'Build 路徑只採用本次下載的 SafeOS、SetupDU、.NET、LCU（不沿用 PackageDir 殘留檔案）' {
-        $script:text | Should -Match "foreach \(\`$key in 'SafeOS', 'SetupDU', 'DotNetCU', 'LCU', 'Checkpoint'\)"
+        $script:text | Should -Match "foreach \(\`$key in 'SafeOS', 'SetupDU', 'DotNetCU', 'LCU', 'Checkpoint', 'Enablement'\)"
         $script:text | Should -Match '\$setNames -contains'
         $script:text | Should -Match 'Build 路徑不回退至 PackageDir'
     }

@@ -103,7 +103,7 @@ function Get-WinMediaParallelJob {
         throw 'Targets 不可為空。'
     }
 
-    $sharedKeys = @('mountSwitches', 'Config', 'ssu', 'lcuStage', 'langFod', 'dotNet', 'appxList', 'storeSet', 'lxpItems', 'driverSet', 'forceUnsigned', 'resetBaseOS', 'common', 'winreWim')
+    $sharedKeys = @('mountSwitches', 'Config', 'ssu', 'lcuStage', 'langFod', 'dotNet', 'enablement', 'appxList', 'storeSet', 'lxpItems', 'driverSet', 'forceUnsigned', 'resetBaseOS', 'common', 'winreWim')
     foreach ($key in $sharedKeys) {
         if (-not $BaseJob.ContainsKey($key)) {
             throw "BaseJob 缺少必要鍵 '$key'。"
@@ -152,6 +152,7 @@ function Get-WinMediaParallelJob {
             lcuStage      = $BaseJob['lcuStage']
             langFod       = $BaseJob['langFod']
             dotNet        = $BaseJob['dotNet']
+            enablement    = $BaseJob['enablement']
             appxList      = $BaseJob['appxList']
             storeSet      = $BaseJob['storeSet']
             lxpItems      = $BaseJob['lxpItems']

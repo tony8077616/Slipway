@@ -7,6 +7,7 @@
         $lcuStage,
         $langFod,
         $dotNet,
+        $enablement,
         $appxList,
         $storeSet,
         $lxpItems,
@@ -25,7 +26,7 @@
         [hashtable]$bootEx
     )
 
-        $img = Invoke-WinMediaInstallIndexImageUpdate -mounted $mounted -ssu $ssu -lcuStage $lcuStage -langFod $langFod -dotNet $dotNet -appxList $appxList -storeSet $storeSet -lxpItems $lxpItems -driverSet $driverSet -forceUnsigned $forceUnsigned -resetBaseOS $resetBaseOS -common $common -IsFirstTarget:$IsFirstTarget -winreWim $winreWim -Config $Config
+        $img = Invoke-WinMediaInstallIndexImageUpdate -mounted $mounted -ssu $ssu -lcuStage $lcuStage -langFod $langFod -dotNet $dotNet -enablement $enablement -appxList $appxList -storeSet $storeSet -lxpItems $lxpItems -driverSet $driverSet -forceUnsigned $forceUnsigned -resetBaseOS $resetBaseOS -common $common -IsFirstTarget:$IsFirstTarget -winreWim $winreWim -Config $Config
         if ($IsFirstTarget) {
             $installKernel.Version = $img.KernelVersion
             $buildInfo.Info = $img.BuildInfo
