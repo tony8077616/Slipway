@@ -363,7 +363,7 @@
         $ssu = $targetSsu | Select-Object -First 1
     }
     else {
-        # 手動路徑：所有 SSU 候選比對 identity 版本，保留最新（convert-UUP :chkssu）；讀不到版本視為 0.0.0.0
+        # 手動路徑：所有 SSU 候選比對 identity 版本，保留最新（convert-UUP :chkssu）；任一 SSU 讀不到版本時，改用目標 CU 內的 SSU 優先
         $ssuVersions = @{}
         foreach ($ssuPath in @($categories.SSU)) {
             $ssuVer = Get-WinMediaPackageVersion -Package $ssuPath -ExpandDir $expandDir -Kind ServicingStack -Config $Config
@@ -376,7 +376,8 @@
             Write-WinMediaLog -Config $Config -Level Warning -Message 'SSU 有無法讀取版本者，本次改用目標 CU 內的 SSU（或排序第一者）。'
         }
         if (@($categories.SSU).Count -gt 1) {
-            Write-WinMediaLog -Config $Config -Level Info -Message "SSU 依版本保留最新：$(Split-Path -Path $ssu -Leaf)（版本 $($ssuVersions[$ssu]) ，無版本資訊者以 0.0.0.0 計）。"
+            $ssuShownVer = if ($ssuVersions.ContainsKey($ssu)) { $ssuVersions[$ssu] } else { '未知' }
+            Write-WinMediaLog -Config $Config -Level Info -Message "SSU 依版本保留最新：$(Split-Path -Path $ssu -Leaf)（版本 $ssuShownVer）。"
         }
         if ($targetSsu.Count -eq 0) {
             Write-WinMediaLog -Config $Config -Level Warning -Message '目標累積更新內找不到 SSU，改從 PackageDir 內的 SSU 選取。'

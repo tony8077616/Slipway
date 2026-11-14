@@ -203,7 +203,7 @@ function Read-WinMediaIdentityVersion {
 }
 
 function Select-WinMediaNewestPackage {
-    # 依版本選出最新者；版本相同時取排序靠前者（呼叫端把目標 CU 的候選排在前面）；讀不到版本視為 0.0.0.0
+    # 依版本選出最新者；版本相同時取排序靠前者（呼叫端把目標 CU 的候選排在前面）；任一候選讀不到版本時直接採用排序第一者
     [CmdletBinding()]
     [OutputType([string])]
     param(
