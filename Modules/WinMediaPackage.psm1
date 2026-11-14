@@ -48,6 +48,11 @@ function Get-WinMediaPackageCategory {
 
     $packages = Get-ChildItem -LiteralPath $PackageDir -File | Where-Object { $_.Extension -in '.cab', '.msu' }
     foreach ($package in $packages) {
+        # AggregatedMetadata 是 MSU 重組用的中繼資料（convert-UUP 只用於重組、不整合），不分類、不展開
+        if ($package.Name -match 'AggregatedMetadata') {
+            Write-WinMediaLog -Config $Config -Level Info -Message "中繼資料略過（convert-UUP 不整合）：$($package.Name)"
+            continue
+        }
         $hint = Get-WinMediaPackageCategoryByName -Name $package.Name
         $category = Get-WinMediaPackageCategoryByContent -Package $package.FullName -ExpandDir $ExpandDir -Config $Config
         if ($category -eq 'Unknown' -and $hint -notin 'Combined', 'Unknown') {
@@ -206,6 +211,9 @@ function Select-WinMediaNewestPackage {
         [Parameter(Mandatory)][hashtable]$Versions
     )
 
+    # 有任何候選讀不到版本時不比版本，直接採用排序第一者（目標 CU 內的 SSU 優先）
+    $complete = @($Paths | Where-Object { $Versions.ContainsKey($_) -and $Versions[$_] }).Count -eq @($Paths).Count
+    if (-not $complete) { return @($Paths)[0] }
     $best = $null
     $bestVersion = [version]'0.0.0.0'
     foreach ($path in $Paths) {

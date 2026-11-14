@@ -383,11 +383,16 @@ function Resolve-WinMediaCumulativeSet {
 
     $candidates = @($Paths | Where-Object { $_ -match '\.msu$' })
     if ($candidates.Count -eq 0) { return $null }
+    # 只有「每個 .msu 候選都讀得到版本」才比版本；缺任何一個都整組退回 KB 編號（缺值會被當成 0.0.0.0，可能把目標誤判為 checkpoint）
+    $useVersions = @($candidates | Where-Object { $Versions.ContainsKey($_) -and $Versions[$_] }).Count -eq $candidates.Count
+    if (-not $useVersions -and $candidates.Count -gt 1 -and $Versions.Count -gt 0) {
+        Write-WinMediaLog -Config $Config -Level Warning -Message '累積更新候選有無法讀取版本者，本次改用 KB 編號排序判定目標。'
+    }
     $ranked = @()
     foreach ($path in $candidates) {
         $kb = Get-WinMediaKbOfName -Name (Split-Path -Path $path -Leaf)
         if ($null -eq $kb -and $candidates.Count -gt 1) { throw "多個累積更新但檔名缺少 KB 編號，無法判定 checkpoint：$(Split-Path -Path $path -Leaf)" }
-        $ver = if ($Versions.ContainsKey($path) -and $Versions[$path]) { [version]$Versions[$path] } else { [version]'0.0.0.0' }
+        $ver = if ($useVersions) { [version]$Versions[$path] } else { [version]'0.0.0.0' }
         $ranked += [pscustomobject]@{ Path = $path; Kb = $kb; Ver = $ver }
     }
     $ordered = @($ranked | Sort-Object -Property @{ Expression = { $_.Ver } }, @{ Expression = { $_.Kb } } -Descending)
