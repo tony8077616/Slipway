@@ -1,4 +1,4 @@
-BeforeAll {
+﻿BeforeAll {
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaPackage.psm1') -Force
     Import-Module -Name (Join-Path -Path $PSScriptRoot -ChildPath '..\Modules\WinMediaUpdate.psm1') -Force
     $script:logCfg = @{
