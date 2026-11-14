@@ -210,7 +210,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Tests\Invoke-Validatio
 - **方向與 Microsoft 文件相反（依 convert-UUP，採用）**：文件第 27 列是 WinPE → 媒體；本工具改為媒體 → WinPE 索引 2，在 LCU、cleanup、驅動之後以 `Config\bootwim.txt`、`Config\bootmui.txt`（來源 `uup-converter-wimlib\bin\`）覆蓋 WinPE 同名檔，並加入根目錄 `setup.exe` 與 `sources\inf\setup.cfg`。實測：參考 ISO 的 bootwim 清單 100 項媒體與 WinPE 完全相同；改採此方向前的輸出有 88 項不同，且全部是媒體版本較新的檔。
 - **寫入方式（實機修正）**：WinPE 同步不掛載索引 2，改用 `wimlib-imagex update <boot.wim> 2`，指令經標準輸入傳入（wimlib 只接受一次 `--command`）。原因：掛載後映像內的 `sources\alert.gif` 只給 Administrators 讀取（擁有者 TrustedInstaller），`Copy-Item` 會被拒絕；`add` 會覆寫既有檔案（已用小型 WIM 實驗確認）。同步在兩個索引卸載之後、export／optimize 之前執行。
 - **已實作（待實機雜湊驗證）**：文件第 28 列的 boot manager（`bootmgfw.efi`、`bootmgr.efi`、`boot.stl`）在索引 2 掛載中自 WinPE 覆蓋到媒體（`UpdateBootFiles` 套用 `_EX` 時略過）。
-- **Enablement（依 convert-UUP 條件套用，待 full7 實測）**：安裝前依映像 Edition 套件判定，Edition 命中且非 LTSC 時安裝 KB5121794（10.0.26100.9544），LTSC 略過；失敗中止（同 convert-UUP `:errmount`）。實際效果見 DESIGN.md 2026-11-14 列。
+- **Enablement（依 convert-UUP 條件套用，full7 已實測）**：安裝前依映像 Edition 套件判定，Edition 命中且非 LTSC 時安裝 KB5121794（10.0.26100.9544），LTSC 略過；失敗中止（同 convert-UUP `:errmount`）。實際效果見 DESIGN.md 2026-11-14 列。
 - **尚未驗證**：多索引輸出（索引 2–5 未更新，成品不可直接部署）、輸出 ISO 的開機測試（VM）、ARM64 開機參數、ADK oscdimg 路徑、`Get-WindowsEdition -Target` 屬性名稱與 wimlib ESD 轉換。`DESIGN.md` 的「未決問題」列出待確認項目。
 
 ## 授權
